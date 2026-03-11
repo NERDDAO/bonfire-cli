@@ -356,10 +356,20 @@ def graph(file):
 
 @cli.command()
 @click.argument("message")
+@click.option("-f", "--file", "file_path", type=click.Path(exists=True), help="Ingest a .md file as a document.")
 @click.option("--title", default=None, help="Title for the ingested document.")
-@click.option("--ingest", is_flag=True, help="Also ingest as a document (for large artifacts like markdown files).")
-def sync(message, title, ingest):
-    """Push context to the Bonfires knowledge graph via stack + ingest."""
+def sync(message, file_path, title):
+    """Push context to the Bonfires knowledge graph.
+
+    The message is always pushed to the stack. Optionally pass -f to also
+    ingest a markdown file as a document.
+
+    Examples:
+
+        bonfire sync "shipped bonfire-cli v0.1"
+
+        bonfire sync "design spec for auth" -f docs/auth-design.md
+    """
     cfg = get_config()
 
     # Derive chatId from git context
@@ -396,12 +406,16 @@ def sync(message, title, ingest):
     api_post(cfg, f"/agents/{cfg['agent_id']}/stack/process", {})
     console.print("[green]OK[/green]")
 
-    # Optional: Ingest as document (for large artifacts like md files)
-    if ingest:
-        console.print("[bold]+[/bold] Ingesting document...", end=" ")
-        doc_title = title or f"Bonfire Sync — {truncate(message, 60)}"
+    # Optional: Ingest a .md file as a document
+    if file_path:
+        if not file_path.endswith(".md"):
+            console.print(f"[yellow]Warning:[/yellow] Only .md files supported for now, got {file_path}")
+            return
+        console.print(f"[bold]+[/bold] Ingesting [cyan]{file_path}[/cyan]...", end=" ")
+        content = Path(file_path).read_text()
+        doc_title = title or Path(file_path).stem.replace("-", " ").replace("_", " ").title()
         ingest_body = {
-            "content": message,
+            "content": content,
             "title": doc_title,
             "bonfire_id": cfg["bonfire_id"],
             "agent_id": cfg["agent_id"],
@@ -409,6 +423,7 @@ def sync(message, title, ingest):
                 "type": "memory-sync",
                 "source": "bonfire-cli",
                 "repo": repo,
+                "file": file_path,
             },
         }
         ingest_resp = api_post(cfg, "/ingest_content", ingest_body)
@@ -419,7 +434,8 @@ def sync(message, title, ingest):
         f"[bold]Context synced[/bold]\n\n"
         f"  Chat ID: [cyan]{chat_id}[/cyan]\n"
         f"  Repo: [cyan]{repo}[/cyan]\n"
-        f"  Message: {truncate(message, 80)}",
+        f"  Message: {truncate(message, 80)}"
+        + (f"\n  File: [cyan]{file_path}[/cyan]" if file_path else ""),
         title="Sync Complete",
         border_style="green",
     ))
