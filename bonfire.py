@@ -3,7 +3,9 @@
 
 import json
 import os
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -350,6 +352,95 @@ def graph(file):
     else:
         data = read_json_stdin()
     format_graph(data)
+
+
+@cli.command()
+@click.argument("message")
+@click.option("--title", default=None, help="Title for the ingested document.")
+@click.option("--ingest", is_flag=True, help="Also ingest as a document (for large artifacts like markdown files).")
+def sync(message, title, ingest):
+    """Push context to the Bonfires knowledge graph via stack + ingest."""
+    cfg = get_config()
+
+    # Derive chatId from git context
+    chat_id = _git_chat_id()
+    repo = chat_id.split(":")[0] if ":" in chat_id else "unknown"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Step 1: Stack add
+    console.print("[bold]1/2[/bold] Pushing to stack...", end=" ")
+    stack_body = {
+        "message": {
+            "userId": "claude-code",
+            "chatId": chat_id,
+            "role": "assistant",
+            "text": message,
+            "timestamp": timestamp,
+        },
+        "metadata": {
+            "type": "memory-sync",
+            "source": "bonfire-cli",
+            "repo": repo,
+        },
+    }
+    stack_resp = api_post(cfg, f"/agents/{cfg['agent_id']}/stack/add", stack_body)
+    if stack_resp.get("success"):
+        console.print("[green]OK[/green]")
+    else:
+        console.print("[red]FAILED[/red]")
+        console.print(stack_resp)
+        return
+
+    # Step 2: Stack process
+    console.print("[bold]2/2[/bold] Processing stack...", end=" ")
+    api_post(cfg, f"/agents/{cfg['agent_id']}/stack/process", {})
+    console.print("[green]OK[/green]")
+
+    # Optional: Ingest as document (for large artifacts like md files)
+    if ingest:
+        console.print("[bold]+[/bold] Ingesting document...", end=" ")
+        doc_title = title or f"Bonfire Sync — {truncate(message, 60)}"
+        ingest_body = {
+            "content": message,
+            "title": doc_title,
+            "bonfire_id": cfg["bonfire_id"],
+            "agent_id": cfg["agent_id"],
+            "metadata": {
+                "type": "memory-sync",
+                "source": "bonfire-cli",
+                "repo": repo,
+            },
+        }
+        ingest_resp = api_post(cfg, "/ingest_content", ingest_body)
+        doc_id = ingest_resp.get("document_id", "unknown")
+        console.print(f"[green]OK[/green] (doc: [dim]{doc_id}[/dim])")
+
+    console.print(Panel(
+        f"[bold]Context synced[/bold]\n\n"
+        f"  Chat ID: [cyan]{chat_id}[/cyan]\n"
+        f"  Repo: [cyan]{repo}[/cyan]\n"
+        f"  Message: {truncate(message, 80)}",
+        title="Sync Complete",
+        border_style="green",
+    ))
+
+
+def _git_chat_id():
+    """Derive a chatId from git repo name + branch."""
+    try:
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5,
+        )
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True, text=True, timeout=5,
+        )
+        repo = Path(toplevel.stdout.strip()).name if toplevel.returncode == 0 else "unknown"
+        br = branch.stdout.strip() if branch.returncode == 0 else "unknown"
+        return f"{repo}:{br}"
+    except Exception:
+        return "bonfire-cli:unknown"
 
 
 if __name__ == "__main__":
