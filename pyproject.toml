@@ -9,7 +9,19 @@ description = "Terminal interface for the Bonfires AI API"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
+authors = [{ name = "NERDDAO", email = "dev@bonfires.ai" }]
 keywords = ["bonfires", "ai", "knowledge-graph", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
@@ -18,7 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/NERDDAO/bonfire-cli"
+Homepage = "https://bonfires.ai"
+Repository = "https://github.com/NERDDAO/bonfire-cli"
+Issues = "https://github.com/NERDDAO/bonfire-cli/issues"
 
 [project.scripts]
 bonfire = "bonfires.cli:cli"
