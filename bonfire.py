@@ -261,15 +261,25 @@ def cli():
 
 @cli.command()
 @click.argument("message")
-def chat(message):
-    """Send a message to a Bonfire agent."""
+@click.option(
+    "--graph-mode", "-g",
+    default="regenerate",
+    type=click.Choice(["regenerate", "append", "adaptive", "static"]),
+    help="Graph interaction mode (default: regenerate).",
+)
+def chat(message, graph_mode):
+    """Send a message to a Bonfire agent.
+
+    By default, queries the knowledge graph and builds a fresh context graph
+    for each message. Use --graph-mode to change this behavior.
+    """
     cfg = get_config()
     body = {
         "message": message,
         "agent_id": cfg["agent_id"],
         "bonfire_id": cfg["bonfire_id"],
         "chat_history": [],
-        "graph_mode": "adaptive",
+        "graph_mode": graph_mode,
     }
     data = api_post(cfg, f"/agents/{cfg['agent_id']}/chat", body)
     format_chat_response(data)
