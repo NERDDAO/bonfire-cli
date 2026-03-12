@@ -5,14 +5,14 @@ A terminal interface for the [Bonfires AI](https://bonfires.ai) API. Chat with a
 ## Install
 
 ```bash
-pip install -e .
+git clone https://github.com/NERDDAO/bonfire-cli.git
+cd bonfire-cli
+./install.sh
 ```
 
-Or with requirements:
+This creates an isolated Python venv and installs a `bonfire` command in `~/.local/bin`. Works from any directory — no need to activate a venv.
 
-```bash
-pip install -r requirements.txt
-```
+To update after pulling new changes, just re-run `./install.sh`.
 
 ## Setup
 
