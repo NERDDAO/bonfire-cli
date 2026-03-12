@@ -1,35 +1,60 @@
-# Bonfire CLI
+# Bonfires CLI
 
-A terminal interface for the [Bonfires AI](https://bonfires.ai) API. Chat with agents, search the knowledge graph, sync context, and render graph data — all from the command line.
+Terminal interface for the [Bonfires AI](https://bonfires.ai) API. Chat with agents, search the knowledge graph, sync context, and render graph data — all from the command line.
 
 ## Install
 
 ```bash
-git clone https://github.com/NERDDAO/bonfire-cli.git
-cd bonfire-cli
-./install.sh
+pip install bonfires
 ```
 
-This creates an isolated Python venv and installs a `bonfire` command in `~/.local/bin`. Works from any directory — no need to activate a venv.
-
-To update after pulling new changes, just re-run `./install.sh`.
-
-## Setup
-
-Copy `.env.example` to `.env` and fill in your credentials:
+Or install from source:
 
 ```bash
-cp .env.example .env
+pip install git+https://github.com/NERDDAO/bonfire-cli.git
 ```
 
-| Variable | Description |
-|----------|-------------|
-| `BONFIRE_API_URL` | API base URL (default: `https://tnt-v2.api.bonfires.ai`) |
-| `BONFIRE_ID` | Your bonfire ID |
-| `BONFIRE_AGENT_ID` | Agent ID to interact with |
-| `BONFIRE_API_KEY` | API key for authentication |
+For global install without polluting your Python environment:
+
+```bash
+pipx install bonfires
+```
+
+## Getting Started
+
+Run the interactive setup:
+
+```bash
+bonfire init
+```
+
+This will:
+1. Connect to the Bonfires API
+2. List your bonfires and let you pick one
+3. List available agents and let you pick one
+4. Save credentials to `~/.config/bonfires/config.env`
+
+You're ready to go:
+
+```bash
+bonfire chat "hello"
+```
 
 ## Commands
+
+### `bonfire init`
+
+Interactive setup wizard. Connects to the API, lists your bonfires and agents, and saves config.
+
+```bash
+bonfire init
+```
+
+Or skip the prompts:
+
+```bash
+bonfire init --api-key YOUR_KEY --bonfire-id ID --agent-id ID
+```
 
 ### `bonfire chat`
 
@@ -39,7 +64,7 @@ Send a message to a Bonfire agent. Searches the knowledge graph by default.
 bonfire chat "What do we know about auth patterns?"
 ```
 
-Use `--graph-mode` to control graph behavior:
+Control graph behavior with `--graph-mode`:
 
 ```bash
 bonfire chat "find related context"                        # default: regenerate
@@ -70,42 +95,38 @@ bonfire sync "design spec for auth" -f docs/auth-design.md
 
 List agents for the configured bonfire.
 
-```bash
-bonfire agents
-```
-
 ### `bonfire bonfires`
 
 List all bonfires.
-
-```bash
-bonfire bonfires
-```
 
 ### `bonfire graph`
 
 Render graph data from a JSON file or stdin.
 
 ```bash
-cat graph.json | bonfire graph
 bonfire graph results.json
+cat graph.json | bonfire graph
 ```
 
 ### `bonfire format-chat` / `bonfire format-delve`
 
-Format raw API responses piped from stdin — useful for scripting with `curl`.
+Format raw API responses piped from stdin — useful for scripting.
 
 ```bash
 curl -s ... | bonfire format-chat
-curl -s ... | bonfire format-delve -q "original query"
 ```
 
-## Claude Code Integration
+## Configuration
 
-Bonfire CLI is used by three Claude Code skills:
+Config is loaded in this order (later overrides earlier):
 
-- **bonfires-query** — `bonfire chat` for agent conversations
-- **bonfires-delve** — `bonfire delve` for knowledge graph search
-- **bonfires-sync** — `bonfire sync` for pushing context
+1. `~/.config/bonfires/config.env` (created by `bonfire init`)
+2. `.env` in the current directory
+3. Environment variables
 
-These skills auto-trigger during planning, brainstorming, and context sync operations.
+| Variable | Description |
+|----------|-------------|
+| `BONFIRE_API_URL` | API base URL (default: `https://tnt-v2.api.bonfires.ai`) |
+| `BONFIRE_ID` | Your bonfire ID |
+| `BONFIRE_AGENT_ID` | Agent ID to interact with |
+| `BONFIRE_API_KEY` | API key for authentication |

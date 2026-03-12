@@ -1,13 +1,23 @@
-# Bonfire CLI
+# Bonfires CLI
 
-A Click-based CLI for the Bonfires AI API. Single-file app in `bonfire.py`.
+A Click-based CLI for the Bonfires AI API. Package structure under `bonfires/`.
 
 ## Architecture
 
-- **Config**: loaded from `.env` via `python-dotenv`
-- **API client**: `api_post` / `api_get` with auth headers from config
-- **Formatters**: Rich-based renderers for chat responses, delve results, graph data
-- **Commands**: `chat`, `delve`, `sync`, `agents`, `bonfires`, `graph`, `format-chat`, `format-delve`
+```
+bonfires/
+  __init__.py    # version
+  cli.py         # Click commands (init, chat, delve, sync, agents, etc.)
+  config.py      # Config loading: env vars > .env > ~/.config/bonfires/config.env
+  api.py         # API client (api_post, api_get)
+  formatting.py  # Rich formatters for chat, delve, graph responses
+```
+
+## Config Priority
+
+1. Environment variables (highest)
+2. `.env` in current directory
+3. `~/.config/bonfires/config.env` (created by `bonfire init`)
 
 ## API Contract
 
@@ -28,6 +38,7 @@ The chat endpoint accepts `graph_mode` with these values:
 
 ```bash
 pip install -e .
+bonfire init
 bonfire chat "hello"
 ```
 
@@ -36,6 +47,8 @@ bonfire chat "hello"
 No test suite yet. Verify changes manually:
 
 ```bash
+bonfire --version
+bonfire init --help
 bonfire chat "test message"
 bonfire delve "test query"
 bonfire agents

@@ -1,4 +1,6 @@
 .env
 __pycache__/
 *.pyc
-UNKNOWN.egg-info/
+*.egg-info/
+build/
+dist/

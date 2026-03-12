@@ -3,10 +3,13 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bonfire-cli"
-version = "0.1.0"
-description = "Beautiful terminal interface for the Bonfires API"
+name = "bonfires"
+version = "0.2.0"
+description = "Terminal interface for the Bonfires AI API"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
+keywords = ["bonfires", "ai", "knowledge-graph", "cli"]
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
@@ -14,5 +17,8 @@ dependencies = [
     "python-dotenv>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/NERDDAO/bonfire-cli"
+
 [project.scripts]
-bonfire = "bonfire:cli"
+bonfire = "bonfires.cli:cli"
