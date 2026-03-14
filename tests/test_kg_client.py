@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 from bonfires.kengram.kg_client import (
+    create_edge,
     create_entity,
     fetch_entities_batch,
     fetch_entity,
@@ -113,3 +114,37 @@ def test_create_entity_returns_none_on_failure(mock_post):
     mock_post.side_effect = SystemExit(1)
     result = create_entity(CFG, "TestNode", ["Label1"], {"key": "val"})
     assert result is None
+
+
+@patch("bonfires.kengram.kg_client.api_post")
+def test_create_edge_success(mock_post):
+    mock_post.return_value = {"success": True, "edge_uuid": "edge-1", "source_uuid": "src-1", "target_uuid": "tgt-1"}
+    result = create_edge(CFG, "src-1", "tgt-1", "USES", fact="Source uses Target")
+    assert result is not None
+    assert result["success"] is True
+    mock_post.assert_called_once_with(
+        CFG,
+        "/knowledge_graph/edge",
+        body={
+            "bonfire_id": "bf-123",
+            "source_uuid": "src-1",
+            "target_uuid": "tgt-1",
+            "edge_name": "USES",
+            "fact": "Source uses Target",
+        },
+    )
+
+
+@patch("bonfires.kengram.kg_client.api_post")
+def test_create_edge_returns_none_on_failure(mock_post):
+    mock_post.side_effect = SystemExit(1)
+    result = create_edge(CFG, "src-1", "tgt-1", "USES")
+    assert result is None
+
+
+@patch("bonfires.kengram.kg_client.api_post")
+def test_create_edge_default_fact(mock_post):
+    mock_post.return_value = {"success": True}
+    create_edge(CFG, "src-1", "tgt-1", "RELATES_TO")
+    call_body = mock_post.call_args[0][2] if len(mock_post.call_args[0]) > 2 else mock_post.call_args[1]["body"]
+    assert call_body["fact"] == ""

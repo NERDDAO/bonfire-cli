@@ -174,6 +174,38 @@ def unpin(uuid: str, source_id: str | None):
 
 
 @kengram.command()
+@click.argument("source")
+@click.argument("target")
+@click.option("--name", "edge_name", required=True, help="Relationship name (e.g. USES, PRODUCES).")
+@click.option("--fact", default="", help="Relationship description.")
+def edge(source: str, target: str, edge_name: str, fact: str):
+    """Add an edge between two pinned nodes."""
+    store = _get_storage()
+    manifest = _get_active_manifest(store)
+    if not manifest:
+        return
+    if source not in manifest.pinned_nodes:
+        console.print(f"[red]Source '{source}' is not pinned.[/red]")
+        return
+    if target not in manifest.pinned_nodes:
+        console.print(f"[red]Target '{target}' is not pinned.[/red]")
+        return
+
+    # Push edge to canonical KG by UUID
+    cfg = get_config()
+    result = kg_client.create_edge(cfg, source, target, edge_name, fact)
+    if result:
+        console.print(f"[green]Pushed[/green] edge to canonical KG")
+    else:
+        console.print("[yellow]Warning:[/yellow] Could not push edge to KG, pinning locally only.")
+
+    manifest.pin_edge(source_uuid=source, target_uuid=target, name=edge_name, fact=fact)
+    store.save(manifest)
+    console.print(f"[green]Edge[/green] {source[:12]} —[{edge_name}]→ {target[:12]}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+@kengram.command()
 @click.argument("kengram_id", required=False)
 def show(kengram_id: str | None):
     """Show a kEngram's details."""

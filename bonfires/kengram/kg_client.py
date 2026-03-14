@@ -86,3 +86,28 @@ def create_entity(
         return result.get("uuid") if isinstance(result, dict) else None
     except SystemExit:
         return None
+
+
+def create_edge(
+    cfg: dict[str, Any],
+    source_uuid: str,
+    target_uuid: str,
+    edge_name: str,
+    fact: str = "",
+) -> dict[str, Any] | None:
+    """Create an edge between two existing entities by UUID."""
+    try:
+        result = api_post(
+            cfg,
+            "/knowledge_graph/edge",
+            body={
+                "bonfire_id": cfg["bonfire_id"],
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
+                "edge_name": edge_name,
+                "fact": fact,
+            },
+        )
+        return result if isinstance(result, dict) else None
+    except SystemExit:
+        return None
