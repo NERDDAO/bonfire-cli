@@ -41,12 +41,13 @@ def export_canvas(
     sorted_entities = sorted(entities, key=lambda e: e.get("name", ""))
     pinned_set = set(manifest.pinned_nodes)
 
-    for i, ent in enumerate(sorted_entities):
+    rendered_idx = 0
+    for ent in sorted_entities:
         uuid = ent.get("uuid", "")
         if uuid not in pinned_set:
             continue
-        col = i % COLS
-        row = i // COLS
+        col = rendered_idx % COLS
+        row = rendered_idx // COLS
         x = (col - 1) * (NODE_W + GAP_X)
         y = -100 + row * (NODE_H + GAP_Y)
 
@@ -70,6 +71,7 @@ def export_canvas(
             "color": color,
             "text": node_text.strip(),
         })
+        rendered_idx += 1
 
     for j, edge in enumerate(edges):
         src = edge.get("source_node_uuid", "")
@@ -98,7 +100,7 @@ def export_canvas(
 
     if episodes:
         sorted_eps = sorted(episodes, key=lambda e: e.get("created_at", e.get("valid_at", "")))
-        ep_y = -100 + ((len(sorted_entities) // COLS) + 1) * (NODE_H + GAP_Y) + GAP_Y
+        ep_y = -100 + ((rendered_idx // COLS) + 1) * (NODE_H + GAP_Y) + GAP_Y
         for k, ep in enumerate(sorted_eps):
             ep_x = (k - len(sorted_eps) // 2) * (NODE_W + GAP_X)
             ep_name = ep.get("name", "Episode")
@@ -114,7 +116,7 @@ def export_canvas(
                 "text": f"### {ep_name}\n{ep_date}",
             })
 
-    meta_y = -100 + ((len(sorted_entities) // COLS) + 2) * (NODE_H + GAP_Y)
+    meta_y = -100 + ((rendered_idx // COLS) + 2) * (NODE_H + GAP_Y)
     canvas_nodes.append({
         "id": "metadata",
         "type": "text",

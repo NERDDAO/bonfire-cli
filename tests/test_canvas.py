@@ -61,6 +61,30 @@ def test_export_has_metadata_node():
     assert m.merkle_root[:16] in meta_nodes[0]["text"]
 
 
+def test_export_grid_no_gaps_with_unpinned_entities():
+    """When entities list has items not in pinned_set, grid indices stay contiguous."""
+    m = KEngramManifest.create(name="Grid Test", kengram_type="session", group_id="g")
+    m.pin_node(uuid="n1", name="Alpha", summary="First", labels=["Entity"])
+    m.pin_node(uuid="n3", name="Charlie", summary="Third", labels=["Entity"])
+
+    entities = [
+        {"uuid": "n1", "name": "Alpha", "summary": "First", "labels": ["Entity"]},
+        {"uuid": "n2", "name": "Bravo", "summary": "Second (not pinned)", "labels": ["Entity"]},
+        {"uuid": "n3", "name": "Charlie", "summary": "Third", "labels": ["Entity"]},
+    ]
+    edges: list[dict[str, str]] = []
+    canvas = export_canvas(m, entities=entities, edges=edges)
+
+    entity_nodes = [n for n in canvas["nodes"] if n["id"] in ("n1", "n3")]
+    assert len(entity_nodes) == 2
+
+    # Both should be on row 0 (rendered_idx 0 and 1), no gap from skipped n2
+    positions = sorted([(n["x"], n["y"]) for n in entity_nodes])
+    # col 0 -> x = (0-1)*(280+40) = -320, col 1 -> x = (1-1)*(280+40) = 0
+    assert positions[0] == (-320, -100)
+    assert positions[1] == (0, -100)
+
+
 def test_export_empty_manifest():
     m = KEngramManifest.create(name="Empty", kengram_type="session", group_id="g")
     canvas = export_canvas(m, entities=[], edges=[])
