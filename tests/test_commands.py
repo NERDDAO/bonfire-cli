@@ -1,5 +1,6 @@
 """Integration tests for kengram CLI commands using Click CliRunner."""
 
+import json
 from unittest.mock import patch
 
 from click.testing import CliRunner
@@ -14,6 +15,11 @@ def _env_overrides(tmp_path):
         "BONFIRE_API_KEY": "test-key",
         "BONFIRE_VAULT_DIR": str(tmp_path),
     }
+
+
+# ---------------------------------------------------------------------------
+# Original tests (Rich output)
+# ---------------------------------------------------------------------------
 
 
 def test_kengram_new(tmp_path):
@@ -246,3 +252,422 @@ def test_create_entity_api_failure(tmp_path):
     assert result.exit_code == 0
     assert "Failed" in result.output
     mock_kg.create_entity.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# --json flag tests
+# ---------------------------------------------------------------------------
+
+
+def test_json_new(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "new", "JSON Test", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "created"
+    assert data["name"] == "JSON Test"
+    assert data["type"] == "session"
+    assert "id" in data
+    assert "path" in data
+    assert "group_id" in data
+
+
+def test_json_new_topic(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "new", "My Topic", "--type", "topic", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "created"
+    assert data["type"] == "topic"
+    assert data["id"].startswith("ke-topic-")
+
+
+def test_json_pin(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Pin JSON"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "pin-uuid-1",
+            "name": "Test Node",
+            "summary": "A node",
+            "labels": ["concept"],
+        }
+        result = runner.invoke(cli, ["kengram", "pin", "pin-uuid-1", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "pinned"
+    assert data["uuid"] == "pin-uuid-1"
+    assert "kengram_id" in data
+    assert "merkle_root" in data
+
+
+def test_json_pin_search_returns_results(tmp_path):
+    """--json + --search returns search_results without prompting."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Search JSON"])
+    fake_results = [
+        {"uuid": "s-1", "name": "Result 1", "summary": "Sum 1", "labels": ["a"]},
+        {"uuid": "s-2", "name": "Result 2", "summary": "Sum 2", "labels": ["b"]},
+    ]
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.search_entities.return_value = fake_results
+        result = runner.invoke(cli, ["kengram", "pin", "--search", "query", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "search_results"
+    assert len(data["results"]) == 2
+    assert data["results"][0]["uuid"] == "s-1"
+
+
+def test_json_unpin(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Unpin JSON"])
+    runner.invoke(
+        cli, ["kengram", "pin", "u-1", "--name", "Node", "--summary", "s", "--labels", "x"]
+    )
+    result = runner.invoke(cli, ["kengram", "unpin", "u-1", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "unpinned"
+    assert data["uuid"] == "u-1"
+
+
+def test_json_show(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Show JSON"])
+    result = runner.invoke(cli, ["kengram", "show", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["name"] == "Show JSON"
+    assert "pinned_nodes" in data
+    assert "merkle_root" in data
+    assert "id" in data
+
+
+def test_json_list_empty(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "list", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["kengrams"] == []
+
+
+def test_json_list_with_items(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Alpha"])
+    runner.invoke(cli, ["kengram", "new", "Beta"])
+    result = runner.invoke(cli, ["kengram", "list", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert len(data["kengrams"]) == 2
+    names = [k["name"] for k in data["kengrams"]]
+    assert "Alpha" in names
+    assert "Beta" in names
+
+
+def test_json_summary(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Sum JSON"])
+    result = runner.invoke(cli, ["kengram", "summary", "New summary", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "updated"
+    assert "id" in data
+
+
+def test_json_use(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Use JSON"])
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    kengram_id = manifests[0].stem
+    result = runner.invoke(cli, ["kengram", "use", kengram_id, "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "active"
+    assert data["id"] == kengram_id
+    assert data["name"] == "Use JSON"
+
+
+def test_json_delete(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Del JSON"])
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    kengram_id = manifests[0].stem
+    result = runner.invoke(cli, ["kengram", "delete", kengram_id, "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "deleted"
+    assert data["id"] == kengram_id
+
+
+def test_json_export(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Export JSON"])
+    result = runner.invoke(cli, ["kengram", "export", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "exported"
+    assert "id" in data
+    assert "path" in data
+
+
+def test_json_verify_local(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        result = runner.invoke(cli, ["kengram", "verify", "--local", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "verified"
+    assert "merkle_root" in data
+    assert "nodes" in data
+    assert "node-001" in data["nodes"]
+    mock_kg.fetch_entities_batch.assert_not_called()
+
+
+def test_json_verify_kg_match(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    fake_batch = [
+        {"uuid": "node-001", "name": "Alpha", "summary": "A node", "labels": ["concept"]},
+    ]
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entities_batch.return_value = fake_batch
+        result = runner.invoke(cli, ["kengram", "verify", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "verified"
+    assert data["nodes"]["node-001"]["status"] == "ok"
+
+
+def test_json_verify_kg_drift(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    fake_batch = [
+        {"uuid": "node-001", "name": "Changed", "summary": "Different", "labels": ["concept"]},
+    ]
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entities_batch.return_value = fake_batch
+        result = runner.invoke(cli, ["kengram", "verify", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "drift"
+    assert data["nodes"]["node-001"]["status"] == "drift"
+    assert "stored_hash" in data["nodes"]["node-001"]
+    assert "kg_hash" in data["nodes"]["node-001"]
+
+
+def test_json_create(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Create JSON"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_entity.return_value = "created-uuid-1"
+        result = runner.invoke(
+            cli,
+            ["kengram", "create", "New Entity", "--labels", "Concept", "--summary", "Test", "--json"],
+        )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "created_and_pinned"
+    assert data["uuid"] == "created-uuid-1"
+    assert data["name"] == "New Entity"
+    assert "merkle_root" in data
+
+
+def test_json_merge(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Source KG"])
+    # Pin a node to source so merge has something to do
+    runner.invoke(
+        cli, ["kengram", "pin", "m-1", "--name", "MergeNode", "--summary", "s", "--labels", "x"]
+    )
+    source_manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    source_id = source_manifests[0].stem
+    runner.invoke(cli, ["kengram", "new", "Target KG", "--type", "topic"])
+    target_manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-topic-*.json"))
+    target_id = target_manifests[0].stem
+    result = runner.invoke(cli, ["kengram", "merge", source_id, "--into", target_id, "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "merged"
+    assert data["source"] == source_id
+    assert data["target"] == target_id
+    assert data["nodes"] >= 1
+    assert "merkle_root" in data
+
+
+def test_json_edge(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Edge JSON"])
+    runner.invoke(
+        cli, ["kengram", "pin", "e-1", "--name", "A", "--summary", "s", "--labels", "x"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "e-2", "--name", "B", "--summary", "s", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        result = runner.invoke(
+            cli, ["kengram", "edge", "e-1", "e-2", "--name", "USES", "--json"]
+        )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "edge_created"
+    assert data["source"] == "e-1"
+    assert data["target"] == "e-2"
+    assert data["name"] == "USES"
+    assert data["kg_synced"] is True
+    assert "merkle_root" in data
+
+
+# ---------------------------------------------------------------------------
+# --json error cases
+# ---------------------------------------------------------------------------
+
+
+def test_json_error_no_active(tmp_path):
+    """Commands that require an active kEngram should return JSON error."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "show", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+
+
+def test_json_error_use_not_found(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "use", "ke-nonexistent", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+    assert "not found" in data["error"]
+
+
+def test_json_error_create_api_failure(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Fail JSON"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_entity.return_value = None
+        result = runner.invoke(
+            cli,
+            ["kengram", "create", "Bad", "--json"],
+        )
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# repin command tests
+# ---------------------------------------------------------------------------
+
+
+def test_repin_success(tmp_path):
+    """repin fetches fresh data from KG and updates the manifest."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin Test"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-1", "--name", "OldName", "--summary", "old", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "rp-1",
+            "name": "NewName",
+            "summary": "new summary",
+            "labels": ["x", "y"],
+        }
+        result = runner.invoke(cli, ["kengram", "repin", "rp-1"])
+    assert result.exit_code == 0
+    assert "Repinned" in result.output
+    assert "hash updated" in result.output
+
+
+def test_repin_no_change(tmp_path):
+    """repin with same data shows no change."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin Same"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-2", "--name", "Same", "--summary", "s", "--labels", "a"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "rp-2",
+            "name": "Same",
+            "summary": "s",
+            "labels": ["a"],
+        }
+        result = runner.invoke(cli, ["kengram", "repin", "rp-2"])
+    assert result.exit_code == 0
+    assert "no change" in result.output
+
+
+def test_repin_not_pinned(tmp_path):
+    """repin fails if UUID is not pinned."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin NotPinned"])
+    result = runner.invoke(cli, ["kengram", "repin", "not-pinned-uuid"])
+    assert result.exit_code == 0
+    assert "not pinned" in result.output
+
+
+def test_repin_api_failure(tmp_path):
+    """repin fails gracefully when KG API is unreachable."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin API Fail"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-3", "--name", "N", "--summary", "s", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = None
+        result = runner.invoke(cli, ["kengram", "repin", "rp-3"])
+    assert result.exit_code == 0
+    assert "Could not fetch" in result.output
+
+
+def test_repin_json_success(tmp_path):
+    """repin --json outputs structured JSON."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin JSON"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-4", "--name", "Old", "--summary", "old", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "rp-4",
+            "name": "New",
+            "summary": "new",
+            "labels": ["x"],
+        }
+        result = runner.invoke(cli, ["kengram", "repin", "rp-4", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "repinned"
+    assert data["uuid"] == "rp-4"
+    assert data["changed"] is True
+    assert "merkle_root" in data
+
+
+def test_repin_json_not_pinned(tmp_path):
+    """repin --json returns error for UUID not pinned."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin JSON Err"])
+    result = runner.invoke(cli, ["kengram", "repin", "not-here", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+    assert "not pinned" in data["error"]
+
+
+def test_repin_json_api_failure(tmp_path):
+    """repin --json returns error when KG API fails."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Repin JSON API"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-5", "--name", "N", "--summary", "s", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = None
+        result = runner.invoke(cli, ["kengram", "repin", "rp-5", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
