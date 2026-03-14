@@ -214,3 +214,35 @@ def test_verify_api_fallback(tmp_path):
     assert "Warning" in result.output
     assert "falling back to local" in result.output
     assert "Verified" in result.output
+
+
+def test_create_entity_success(tmp_path):
+    """create command pushes entity to KG and pins it."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Create Test"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_entity.return_value = "new-uuid-123"
+        result = runner.invoke(
+            cli,
+            ["kengram", "create", "My Entity", "--labels", "Concept,Test", "--summary", "A test entity"],
+        )
+    assert result.exit_code == 0
+    assert "Created + Pinned" in result.output
+    assert "new-uuid-123" in result.output
+    assert "My Entity" in result.output
+    mock_kg.create_entity.assert_called_once()
+
+
+def test_create_entity_api_failure(tmp_path):
+    """create command aborts when API returns None."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Create Fail Test"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_entity.return_value = None
+        result = runner.invoke(
+            cli,
+            ["kengram", "create", "Bad Entity", "--summary", "Will fail"],
+        )
+    assert result.exit_code == 0
+    assert "Failed" in result.output
+    mock_kg.create_entity.assert_called_once()

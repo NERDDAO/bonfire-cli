@@ -423,3 +423,27 @@ def verify(kengram_id: str | None, local_only: bool):
         console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
         console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
         console.print(f"  Recomputed root: [dim]{recomputed[:16]}...[/dim]")
+
+
+@kengram.command()
+@click.argument("name")
+@click.option("--labels", default="Entity", help="Comma-separated labels.")
+@click.option("--summary", default="", help="Entity summary.")
+def create(name: str, labels: str, summary: str) -> None:
+    """Create a new entity in the KG and pin it to the active kEngram."""
+    cfg = get_config()
+    store = _get_storage()
+    manifest = _get_active_manifest(store)
+    if not manifest:
+        return
+    label_list = [lb.strip() for lb in labels.split(",") if lb.strip()]
+    attributes: dict[str, Any] = {"summary": summary} if summary else {}
+    uuid = kg_client.create_entity(cfg, name, label_list, attributes)
+    if not uuid:
+        console.print("[red]Failed to create entity in KG.[/red]")
+        return
+    manifest.pin_node(uuid=uuid, name=name, summary=summary, labels=label_list)
+    store.save(manifest)
+    console.print(f"[green]Created + Pinned[/green] {uuid}")
+    console.print(f"  Name: {name}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
