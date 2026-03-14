@@ -27,6 +27,7 @@ class KEngramManifest:
         pinned_edges: list[str],
         episodes: list[str],
         node_hashes: dict[str, str],
+        node_meta: dict[str, dict[str, Any]] | None,
         edge_hashes: dict[str, str],
         merkle_root_value: str,
         parent_topic: str | None,
@@ -42,6 +43,7 @@ class KEngramManifest:
         self.pinned_edges = pinned_edges
         self.episodes = episodes
         self._node_hashes = node_hashes
+        self._node_meta: dict[str, dict[str, Any]] = node_meta or {}
         self._edge_hashes = edge_hashes
         self.merkle_root = merkle_root_value
         self.parent_topic = parent_topic
@@ -77,6 +79,7 @@ class KEngramManifest:
             pinned_edges=[],
             episodes=[],
             node_hashes={},
+            node_meta=None,
             edge_hashes={},
             merkle_root_value=empty_root,
             parent_topic=parent_topic,
@@ -94,6 +97,7 @@ class KEngramManifest:
             return
         self.pinned_nodes.append(uuid)
         self._node_hashes[uuid] = hash_node(uuid, name, summary, labels)
+        self._node_meta[uuid] = {"name": name, "summary": summary, "labels": labels}
         self._recompute_merkle()
 
     def unpin_node(self, uuid: str) -> None:
@@ -101,6 +105,7 @@ class KEngramManifest:
             return
         self.pinned_nodes.remove(uuid)
         self._node_hashes.pop(uuid, None)
+        self._node_meta.pop(uuid, None)
         self._recompute_merkle()
 
     def pin_edge(self, source_uuid: str, target_uuid: str, name: str, fact: str) -> None:
@@ -132,6 +137,8 @@ class KEngramManifest:
                 self.pinned_nodes.append(uuid)
                 if uuid in source._node_hashes:
                     self._node_hashes[uuid] = source._node_hashes[uuid]
+                if uuid in source._node_meta:
+                    self._node_meta[uuid] = source._node_meta[uuid]
 
         for key in source.pinned_edges:
             if key not in self.pinned_edges:
@@ -156,6 +163,7 @@ class KEngramManifest:
             "pinned_edges": self.pinned_edges,
             "episodes": self.episodes,
             "node_hashes": self._node_hashes,
+            "node_meta": self._node_meta,
             "edge_hashes": self._edge_hashes,
             "merkle_root": self.merkle_root,
             "parent_topic": self.parent_topic,
@@ -175,6 +183,7 @@ class KEngramManifest:
             pinned_edges=data.get("pinned_edges", []),
             episodes=data.get("episodes", []),
             node_hashes=data.get("node_hashes", {}),
+            node_meta=data.get("node_meta"),
             edge_hashes=data.get("edge_hashes", {}),
             merkle_root_value=data.get("merkle_root", ""),
             parent_topic=data.get("parent_topic"),

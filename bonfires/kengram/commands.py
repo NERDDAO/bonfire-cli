@@ -326,10 +326,15 @@ def export(kengram_id: str | None, fmt: str):
         manifest = _get_active_manifest(store)
         if not manifest:
             return
-    entities = [
-        {"uuid": node_uuid, "name": node_uuid[:12], "summary": "", "labels": []}
-        for node_uuid in manifest.pinned_nodes
-    ]
+    entities = []
+    for node_uuid in manifest.pinned_nodes:
+        meta = manifest._node_meta.get(node_uuid, {})
+        entities.append({
+            "uuid": node_uuid,
+            "name": meta.get("name", node_uuid[:12]),
+            "summary": meta.get("summary", ""),
+            "labels": meta.get("labels", []),
+        })
     edges = []
     for key in manifest.pinned_edges:
         parts = key.split(":", 2)
