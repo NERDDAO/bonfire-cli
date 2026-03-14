@@ -21,7 +21,7 @@ CFG = {
 
 @patch("bonfires.kengram.kg_client.api_get")
 def test_fetch_entity_success(mock_get):
-    mock_get.return_value = {"uuid": "abc", "name": "Node"}
+    mock_get.return_value = {"success": True, "entity": {"uuid": "abc", "name": "Node"}}
     result = fetch_entity(CFG, "abc")
     assert result == {"uuid": "abc", "name": "Node"}
     mock_get.assert_called_once_with(
@@ -41,7 +41,7 @@ def test_fetch_entity_returns_none_on_failure(mock_get):
 @patch("bonfires.kengram.kg_client.api_post")
 def test_fetch_entities_batch_success(mock_post):
     entities = [{"uuid": "a"}, {"uuid": "b"}]
-    mock_post.return_value = entities
+    mock_post.return_value = {"success": True, "entities": entities}
     result = fetch_entities_batch(CFG, ["a", "b"])
     assert result == entities
     mock_post.assert_called_once_with(
@@ -61,7 +61,7 @@ def test_fetch_entities_batch_returns_none_on_failure(mock_post):
 @patch("bonfires.kengram.kg_client.api_post")
 def test_search_entities_success(mock_post):
     entities = [{"uuid": "x", "name": "Found"}]
-    mock_post.return_value = entities
+    mock_post.return_value = {"success": True, "entities": entities}
     result = search_entities(CFG, "test query", num_results=5)
     assert result == entities
     mock_post.assert_called_once_with(
@@ -78,7 +78,7 @@ def test_search_entities_success(mock_post):
 
 @patch("bonfires.kengram.kg_client.api_post")
 def test_search_entities_default_num_results(mock_post):
-    mock_post.return_value = []
+    mock_post.return_value = {"success": True, "entities": []}
     search_entities(CFG, "q")
     call_body = mock_post.call_args[1]["body"] if mock_post.call_args[1] else mock_post.call_args[0][2]
     assert call_body["num_results"] == 10

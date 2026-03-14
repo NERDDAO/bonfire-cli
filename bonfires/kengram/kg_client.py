@@ -14,11 +14,14 @@ from bonfires.api import api_get, api_post
 def fetch_entity(cfg: dict[str, Any], uuid: str) -> dict[str, Any] | None:
     """Fetch a single entity by UUID from the knowledge graph."""
     try:
-        return api_get(
+        result = api_get(
             cfg,
             f"/knowledge_graph/entity/{uuid}",
             params={"bonfire_id": cfg["bonfire_id"]},
         )
+        if isinstance(result, dict) and "entity" in result:
+            return result["entity"]
+        return result
     except SystemExit:
         return None
 
@@ -28,11 +31,14 @@ def fetch_entities_batch(
 ) -> list[dict[str, Any]] | None:
     """Fetch multiple entities by UUID in a single request."""
     try:
-        return api_post(
+        result = api_post(
             cfg,
             f"/knowledge_graph/entities/batch?bonfire_id={cfg['bonfire_id']}",
             body={"entity_uuids": uuids},
         )
+        if isinstance(result, dict) and "entities" in result:
+            return result["entities"]
+        return result
     except SystemExit:
         return None
 
@@ -42,7 +48,7 @@ def search_entities(
 ) -> list[dict[str, Any]] | None:
     """Search the knowledge graph via the /delve endpoint."""
     try:
-        return api_post(
+        result = api_post(
             cfg,
             "/delve",
             body={
@@ -52,6 +58,9 @@ def search_entities(
                 "agent_id": cfg["agent_id"],
             },
         )
+        if isinstance(result, dict):
+            return result.get("entities", [])
+        return result
     except SystemExit:
         return None
 
