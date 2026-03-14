@@ -53,6 +53,42 @@ def _get_active_manifest(
     return manifest
 
 
+def _verify_for_export(manifest: KEngramManifest) -> dict[str, str]:
+    """Run a quick verify and return per-node status for canvas coloring.
+
+    Returns a dict of uuid -> "OK" | "DRIFT" | "NOT_IN_KG".
+    On API failure, returns empty dict (all nodes will be "UNVERIFIED").
+    """
+    from bonfires.kengram.hashing import hash_node
+
+    if not manifest.pinned_nodes:
+        return {}
+
+    cfg = get_config()
+    fetched = kg_client.fetch_entities_batch(cfg, manifest.pinned_nodes)
+    if fetched is None:
+        return {}
+
+    entity_map: dict[str, dict[str, Any]] = {str(e["uuid"]): e for e in fetched}
+    status: dict[str, str] = {}
+
+    for node_uuid in manifest.pinned_nodes:
+        entity = entity_map.get(node_uuid)
+        if entity is None:
+            status[node_uuid] = "NOT_IN_KG"
+            continue
+        kg_hash = hash_node(
+            node_uuid,
+            str(entity.get("name", "")),
+            str(entity.get("summary", "")),
+            list(entity.get("labels", [])),
+        )
+        stored_hash = manifest._node_hashes.get(node_uuid, "")
+        status[node_uuid] = "OK" if kg_hash == stored_hash else "DRIFT"
+
+    return status
+
+
 @click.group()
 def kengram():
     """Manage kEngrams — verifiable knowledge subgraphs."""
@@ -520,7 +556,9 @@ def export(kengram_id: str | None, fmt: str, output_json: bool):
                 "name": parts[2],
                 "fact": "",
             })
-    canvas_data = export_canvas(manifest, entities=entities, edges=edges)
+    # Run verify to get per-node KG sync status for coloring
+    node_status = _verify_for_export(manifest)
+    canvas_data = export_canvas(manifest, entities=entities, edges=edges, node_status=node_status)
     path = store.save_canvas(manifest.id, canvas_data)
     if output_json:
         click.echo(json.dumps({"status": "exported", "id": manifest.id, "path": str(path)}))

@@ -101,7 +101,18 @@ def export_canvas(
     entities: list[dict[str, Any]],
     edges: list[dict[str, Any]],
     episodes: list[dict[str, Any]] | None = None,
+    node_status: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    """Export manifest to Obsidian canvas.
+
+    node_status maps uuid -> "OK" | "DRIFT" | "NOT_IN_KG" | "UNVERIFIED".
+    Colors are based on verify status:
+      4 (green)  = verified, matches KG
+      5 (cyan)   = unverified (not checked yet)
+      2 (orange) = local-only / not in KG
+      1 (red)    = drift detected (KG differs)
+      3 (yellow) = TaxonomyLabel (verified OK with taxonomy)
+    """
     canvas_nodes: list[dict[str, Any]] = []
     canvas_edges: list[dict[str, Any]] = []
     pinned_set = set(manifest.pinned_nodes)
@@ -170,11 +181,17 @@ def export_canvas(
         label_str = " ".join(f"[{label}]" for label in labels) if labels else ""
         node_text = f"### {ent.get('name', node_id)}\n{label_str}\n{ent.get('summary', '')}"
 
-        color = "4"
-        if "TaxonomyLabel" in labels:
-            color = "3"
-        elif "Update" in labels:
-            color = "5"
+        # Color by verify status: 4=green(OK), 5=cyan(unverified), 2=orange(not in KG), 1=red(drift)
+        status = (node_status or {}).get(node_id, "UNVERIFIED")
+        if status == "OK":
+            # Verified OK — green, or yellow for TaxonomyLabel
+            color = "3" if "TaxonomyLabel" in labels else "4"
+        elif status == "DRIFT":
+            color = "1"  # red
+        elif status == "NOT_IN_KG":
+            color = "2"  # orange
+        else:
+            color = "5"  # cyan = unverified
 
         canvas_nodes.append({
             "id": node_id,
