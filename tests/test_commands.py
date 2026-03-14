@@ -149,3 +149,68 @@ def test_pin_with_search(tmp_path):
     assert "Pinned" in result.output
     assert "search-001" in result.output
     mock_kg.search_entities.assert_called_once()
+
+
+def _create_kengram_with_node(runner, tmp_path):
+    """Helper: create a kEngram and pin a node with manual metadata."""
+    runner.invoke(cli, ["kengram", "new", "Verify Test"])
+    runner.invoke(
+        cli,
+        ["kengram", "pin", "node-001", "--name", "Alpha", "--summary", "A node", "--labels", "concept"],
+    )
+    return runner
+
+
+def test_verify_against_kg_matching(tmp_path):
+    """Batch API returns entities with matching hashes — verify passes."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    fake_batch = [
+        {"uuid": "node-001", "name": "Alpha", "summary": "A node", "labels": ["concept"]},
+    ]
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entities_batch.return_value = fake_batch
+        result = runner.invoke(cli, ["kengram", "verify"])
+    assert result.exit_code == 0
+    assert "Verified" in result.output
+    assert "OK" in result.output
+    mock_kg.fetch_entities_batch.assert_called_once()
+
+
+def test_verify_against_kg_drift(tmp_path):
+    """Batch API returns entity with different content — per-node DRIFT shown."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    fake_batch = [
+        {"uuid": "node-001", "name": "Changed Name", "summary": "Different", "labels": ["concept"]},
+    ]
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entities_batch.return_value = fake_batch
+        result = runner.invoke(cli, ["kengram", "verify"])
+    assert result.exit_code == 0
+    assert "DRIFT" in result.output
+    mock_kg.fetch_entities_batch.assert_called_once()
+
+
+def test_verify_local_flag(tmp_path):
+    """--local flag skips API call entirely."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        result = runner.invoke(cli, ["kengram", "verify", "--local"])
+    assert result.exit_code == 0
+    assert "Verified" in result.output
+    mock_kg.fetch_entities_batch.assert_not_called()
+
+
+def test_verify_api_fallback(tmp_path):
+    """Batch API returns None — warning printed and local fallback used."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    _create_kengram_with_node(runner, tmp_path)
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entities_batch.return_value = None
+        result = runner.invoke(cli, ["kengram", "verify"])
+    assert result.exit_code == 0
+    assert "Warning" in result.output
+    assert "falling back to local" in result.output
+    assert "Verified" in result.output

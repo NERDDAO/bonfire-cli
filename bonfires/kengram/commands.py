@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 from rich.console import Console
 from rich.panel import Panel
@@ -345,9 +347,11 @@ def export(kengram_id: str | None, fmt: str):
 
 @kengram.command()
 @click.argument("kengram_id", required=False)
-def verify(kengram_id: str | None):
+@click.option("--local", "local_only", is_flag=True, help="Skip API verification, check locally only.")
+def verify(kengram_id: str | None, local_only: bool):
     """Verify a kEngram's merkle root against stored hashes."""
     store = _get_storage()
+    cfg = get_config()
     if kengram_id:
         manifest = store.load(kengram_id)
         if not manifest:
@@ -357,7 +361,58 @@ def verify(kengram_id: str | None):
         manifest = _get_active_manifest(store)
         if not manifest:
             return
+
+    from bonfires.kengram.hashing import hash_node
     from bonfires.kengram.hashing import merkle_root as compute_merkle
+
+    if not local_only and manifest.pinned_nodes:
+        fetched = kg_client.fetch_entities_batch(cfg, manifest.pinned_nodes)
+        if fetched is None:
+            console.print(
+                "[yellow]Warning:[/yellow] Could not reach KG API, falling back to local verification."
+            )
+        else:
+            entity_map: dict[str, dict[str, Any]] = {
+                str(e["uuid"]): e for e in fetched
+            }
+            kg_node_hashes: dict[str, str] = {}
+            for node_uuid in manifest.pinned_nodes:
+                entity = entity_map.get(node_uuid)
+                if entity is None:
+                    console.print(f"  {node_uuid[:12]}  [yellow]NOT IN KG[/yellow]")
+                    kg_node_hashes[node_uuid] = manifest._node_hashes.get(node_uuid, "")
+                    continue
+                kg_hash = hash_node(
+                    node_uuid,
+                    str(entity.get("name", "")),
+                    str(entity.get("summary", "")),
+                    list(entity.get("labels", [])),  # type narrowing for list
+                )
+                kg_node_hashes[node_uuid] = kg_hash
+                stored_hash = manifest._node_hashes.get(node_uuid, "")
+                if kg_hash == stored_hash:
+                    console.print(f"  {node_uuid[:12]}  [green]OK[/green]")
+                else:
+                    console.print(
+                        f"  {node_uuid[:12]}  [yellow]DRIFT[/yellow]"
+                        f"  stored={stored_hash[:12]}.. kg={kg_hash[:12]}.."
+                    )
+
+            console.print("[dim]Edge verification: local-only (no batch edge endpoint)[/dim]")
+
+            all_hashes = list(kg_node_hashes.values()) + list(manifest._edge_hashes.values())
+            recomputed = compute_merkle(all_hashes)
+            if recomputed == manifest.merkle_root:
+                console.print(f"[green]Verified[/green] {manifest.id}")
+                console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+                console.print(f"  Nodes: {len(manifest.pinned_nodes)}, Edges: {len(manifest.pinned_edges)}")
+            else:
+                console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
+                console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
+                console.print(f"  Recomputed root: [dim]{recomputed[:16]}...[/dim]")
+            return
+
+    # Local-only verification (--local flag or API fallback or no pinned nodes)
     all_hashes = list(manifest._node_hashes.values()) + list(manifest._edge_hashes.values())
     recomputed = compute_merkle(all_hashes)
     if recomputed == manifest.merkle_root:
