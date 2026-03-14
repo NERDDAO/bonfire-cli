@@ -228,6 +228,22 @@ def merge(source_id: str, target_id: str):
 
 
 @kengram.command()
+@click.argument("kengram_id")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+def delete(kengram_id: str, force: bool):
+    """Delete a kEngram by ID."""
+    store = _get_storage()
+    manifest = store.load(kengram_id)
+    if not manifest:
+        console.print(f"[red]kEngram '{kengram_id}' not found.[/red]")
+        return
+    if not force:
+        click.confirm(f"Delete kEngram '{manifest.name}' ({kengram_id})?", abort=True)
+    store.delete(kengram_id)
+    console.print(f"[red]Deleted[/red] {kengram_id}")
+
+
+@kengram.command()
 @click.argument("kengram_id", required=False)
 @click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas"]))
 def export(kengram_id: str | None, fmt: str):

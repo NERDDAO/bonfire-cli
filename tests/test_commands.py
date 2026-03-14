@@ -62,6 +62,26 @@ def test_kengram_use(tmp_path):
     assert result.exit_code == 0
 
 
+def test_kengram_delete_force(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Delete Me"])
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    assert len(manifests) == 1
+    kengram_id = manifests[0].stem
+    result = runner.invoke(cli, ["kengram", "delete", kengram_id, "--force"])
+    assert result.exit_code == 0
+    assert "Deleted" in result.output
+    manifests_after = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    assert len(manifests_after) == 0
+
+
+def test_kengram_delete_not_found(tmp_path):
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "delete", "ke-nonexistent", "--force"])
+    assert result.exit_code == 0
+    assert "not found" in result.output
+
+
 def test_kengram_export(tmp_path):
     runner = CliRunner(env=_env_overrides(tmp_path))
     runner.invoke(cli, ["kengram", "new", "Export Test"])
