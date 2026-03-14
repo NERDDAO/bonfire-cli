@@ -116,6 +116,22 @@ Format raw API responses piped from stdin — useful for scripting.
 curl -s ... | bonfire format-chat
 ```
 
+### `bonfire kengram`
+
+Manage verifiable knowledge subgraphs — curated projections of the canonical Bonfires KG.
+
+```bash
+bonfire kengram new "Session Name"     # create and set active
+bonfire kengram pin <uuid> --name X    # pin a KG entity
+bonfire kengram show                   # show active kEngram
+bonfire kengram verify                 # check merkle root integrity
+bonfire kengram merge <src> --into <tgt>  # merge session → topic
+bonfire kengram export                 # export to .canvas
+bonfire kengram list                   # list all
+```
+
+Set `BONFIRE_VAULT_DIR` to control where manifests and canvas files are stored (default: `~/Vaults/Bonfires/vault`).
+
 ## Configuration
 
 Config is loaded in this order (later overrides earlier):

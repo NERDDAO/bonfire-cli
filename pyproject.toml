@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bonfires"
-version = "0.2.0"
+version = "0.3.0"
 description = "Terminal interface for the Bonfires AI API"
 readme = "README.md"
 license = "MIT"
