@@ -9,6 +9,7 @@ Config is loaded from (in priority order):
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import dotenv_values
 from rich.console import Console
@@ -27,10 +28,10 @@ REQUIRED_KEYS = {
 DEFAULT_API_URL = "https://tnt-v2.api.bonfires.ai"
 
 
-def get_config():
+def get_config() -> dict[str, Any]:
     """Load and validate configuration."""
     # Layer 1: defaults
-    cfg = {"api_url": DEFAULT_API_URL}
+    cfg: dict[str, Any] = {"api_url": DEFAULT_API_URL}
 
     # Layer 2: global config file
     if CONFIG_FILE.exists():

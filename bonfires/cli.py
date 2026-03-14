@@ -15,6 +15,7 @@ from rich.table import Table
 from bonfires import __version__
 from bonfires.api import api_get, api_post
 from bonfires.config import CONFIG_DIR, CONFIG_FILE, DEFAULT_API_URL, get_config
+from bonfires.kengram.commands import kengram as kengram_group
 from bonfires.formatting import (
     format_chat_response,
     format_delve_response,
@@ -396,6 +397,9 @@ def _git_chat_id():
         return f"{repo}:{br}"
     except Exception:
         return "bonfire-cli:unknown"
+
+
+cli.add_command(kengram_group)
 
 
 if __name__ == "__main__":
