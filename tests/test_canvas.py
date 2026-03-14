@@ -48,8 +48,10 @@ def test_export_has_entity_nodes():
 def test_export_has_edges():
     m, entities, edges = _make_manifest_with_data()
     canvas = export_canvas(m, entities=entities, edges=edges)
-    assert len(canvas["edges"]) >= 1
-    edge_labels = [e.get("label", "") for e in canvas["edges"]]
+    # Only real edges, no summary-to-node edges
+    real_edges = [e for e in canvas["edges"] if not e["id"].startswith("s-")]
+    assert len(real_edges) >= 1
+    edge_labels = [e.get("label", "") for e in real_edges]
     assert "RELATES_TO" in edge_labels
 
 
@@ -61,8 +63,32 @@ def test_export_has_metadata_node():
     assert m.merkle_root[:16] in meta_nodes[0]["text"]
 
 
-def test_export_grid_no_gaps_with_unpinned_entities():
-    """When entities list has items not in pinned_set, grid indices stay contiguous."""
+def test_export_topology_layout():
+    """Nodes connected by edges should be on different layers (y positions)."""
+    m, entities, edges = _make_manifest_with_data()
+    canvas = export_canvas(m, entities=entities, edges=edges)
+
+    node_positions = {n["id"]: (n["x"], n["y"]) for n in canvas["nodes"]}
+    # n1 -> n2 via RELATES_TO, so n1 should be layer 0, n2 layer 1
+    assert "n1" in node_positions
+    assert "n2" in node_positions
+    assert node_positions["n1"][1] < node_positions["n2"][1], "source should be above target"
+
+
+def test_export_edge_sides_vertical():
+    """When source is above target, edge should go bottom->top."""
+    m, entities, edges = _make_manifest_with_data()
+    canvas = export_canvas(m, entities=entities, edges=edges)
+
+    real_edges = [e for e in canvas["edges"] if e.get("label") == "RELATES_TO"]
+    assert len(real_edges) == 1
+    edge = real_edges[0]
+    assert edge["fromSide"] == "bottom"
+    assert edge["toSide"] == "top"
+
+
+def test_export_no_gaps_with_unpinned_entities():
+    """Unpinned entities in the entities list are excluded from layout."""
     m = KEngramManifest.create(name="Grid Test", kengram_type="session", group_id="g")
     m.pin_node(uuid="n1", name="Alpha", summary="First", labels=["Entity"])
     m.pin_node(uuid="n3", name="Charlie", summary="Third", labels=["Entity"])
@@ -77,12 +103,9 @@ def test_export_grid_no_gaps_with_unpinned_entities():
 
     entity_nodes = [n for n in canvas["nodes"] if n["id"] in ("n1", "n3")]
     assert len(entity_nodes) == 2
-
-    # Both should be on row 0 (rendered_idx 0 and 1), no gap from skipped n2
-    positions = sorted([(n["x"], n["y"]) for n in entity_nodes])
-    # col 0 -> x = (0-1)*(280+40) = -320, col 1 -> x = (1-1)*(280+40) = 0
-    assert positions[0] == (-320, -100)
-    assert positions[1] == (0, -100)
+    # Both disconnected, same layer, side by side
+    ys = {n["y"] for n in entity_nodes}
+    assert len(ys) == 1, "disconnected nodes should be on the same layer"
 
 
 def test_export_empty_manifest():
@@ -91,3 +114,27 @@ def test_export_empty_manifest():
     assert "nodes" in canvas
     summary_nodes = [n for n in canvas["nodes"] if n["id"] == "summary"]
     assert len(summary_nodes) == 1
+
+
+def test_export_three_layer_graph():
+    """A chain A->B->C should produce 3 layers."""
+    m = KEngramManifest.create(name="Chain", kengram_type="session", group_id="g")
+    m.pin_node(uuid="a", name="A", summary="", labels=["Entity"])
+    m.pin_node(uuid="b", name="B", summary="", labels=["Entity"])
+    m.pin_node(uuid="c", name="C", summary="", labels=["Entity"])
+    m.pin_edge(source_uuid="a", target_uuid="b", name="LEADS_TO", fact="")
+    m.pin_edge(source_uuid="b", target_uuid="c", name="LEADS_TO", fact="")
+
+    entities = [
+        {"uuid": "a", "name": "A", "summary": "", "labels": ["Entity"]},
+        {"uuid": "b", "name": "B", "summary": "", "labels": ["Entity"]},
+        {"uuid": "c", "name": "C", "summary": "", "labels": ["Entity"]},
+    ]
+    edges = [
+        {"source_node_uuid": "a", "target_node_uuid": "b", "name": "LEADS_TO"},
+        {"source_node_uuid": "b", "target_node_uuid": "c", "name": "LEADS_TO"},
+    ]
+    canvas = export_canvas(m, entities=entities, edges=edges)
+
+    pos = {n["id"]: n["y"] for n in canvas["nodes"] if n["id"] in ("a", "b", "c")}
+    assert pos["a"] < pos["b"] < pos["c"], "chain should produce ascending y positions"
