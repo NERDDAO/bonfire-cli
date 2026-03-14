@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from bonfires.config import get_config
+from bonfires.kengram import kg_client
 from bonfires.kengram.canvas import export_canvas
 from bonfires.kengram.manifest import KEngramManifest
 from bonfires.kengram.storage import KEngramStorage
@@ -61,13 +62,22 @@ def new(name: str, kengram_type: str, parent: str | None):
 
 
 @kengram.command()
-@click.argument("uuid")
+@click.argument("uuid", required=False, default=None)
 @click.option("--to", "target_id", default=None, help="Target kEngram ID (default: active).")
 @click.option("--name", "node_name", default="", help="Entity name.")
 @click.option("--summary", default="", help="Entity summary.")
 @click.option("--labels", default="", help="Comma-separated labels.")
-def pin(uuid: str, target_id: str | None, node_name: str, summary: str, labels: str):
+@click.option("--search", "search_query", default=None, help="Search KG for entities to pin.")
+def pin(
+    uuid: str | None,
+    target_id: str | None,
+    node_name: str,
+    summary: str,
+    labels: str,
+    search_query: str | None,
+):
     """Pin a KG entity to a kEngram."""
+    cfg = get_config()
     store = _get_storage()
     if target_id:
         manifest = store.load(target_id)
@@ -78,10 +88,66 @@ def pin(uuid: str, target_id: str | None, node_name: str, summary: str, labels: 
         manifest = _get_active_manifest(store)
         if not manifest:
             return
-    label_list = [lb.strip() for lb in labels.split(",") if lb.strip()] if labels else []
-    manifest.pin_node(uuid=uuid, name=node_name, summary=summary, labels=label_list)
+
+    if search_query:
+        results = kg_client.search_entities(cfg, search_query)
+        if not results:
+            console.print("[red]No results found.[/red]")
+            return
+        table = Table(title="Search Results", title_style="bold")
+        table.add_column("#", justify="right")
+        table.add_column("UUID", style="dim")
+        table.add_column("Name", style="bold")
+        table.add_column("Labels")
+        table.add_column("Summary")
+        for i, entity in enumerate(results, 1):
+            entity_summary = entity.get("summary", "") or ""
+            truncated = entity_summary[:60] + "..." if len(entity_summary) > 60 else entity_summary
+            table.add_row(
+                str(i),
+                entity.get("uuid", ""),
+                entity.get("name", ""),
+                ", ".join(entity.get("labels", [])),
+                truncated,
+            )
+        console.print(table)
+        choice = click.prompt("Select entity", type=int)
+        if choice < 1 or choice > len(results):
+            console.print("[red]Invalid selection.[/red]")
+            return
+        selected = results[choice - 1]
+        pin_uuid = selected.get("uuid", "")
+        pin_name = selected.get("name", "")
+        pin_summary = selected.get("summary", "")
+        pin_labels = selected.get("labels", [])
+    elif uuid:
+        pin_uuid = uuid
+        if node_name:
+            # Manual metadata provided — skip API call
+            pin_name = node_name
+            pin_summary = summary
+            pin_labels = [lb.strip() for lb in labels.split(",") if lb.strip()] if labels else []
+        else:
+            # Try to fetch from KG
+            entity = kg_client.fetch_entity(cfg, uuid)
+            if entity:
+                pin_name = entity.get("name", "")
+                pin_summary = entity.get("summary", "")
+                pin_labels = entity.get("labels", [])
+            else:
+                console.print(
+                    "[yellow]Warning:[/yellow] Could not fetch entity from KG, using provided metadata."
+                )
+                pin_name = node_name
+                pin_summary = summary
+                pin_labels = [lb.strip() for lb in labels.split(",") if lb.strip()] if labels else []
+    else:
+        console.print("[red]Provide a UUID or use --search.[/red]")
+        return
+
+    manifest.pin_node(uuid=pin_uuid, name=pin_name, summary=pin_summary, labels=pin_labels)
     store.save(manifest)
-    console.print(f"[green]Pinned[/green] {uuid} to {manifest.id}")
+    console.print(f"[green]Pinned[/green] {pin_uuid} to {manifest.id}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
 
 
