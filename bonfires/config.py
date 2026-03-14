@@ -48,6 +48,11 @@ def get_config():
     cfg["bonfire_id"] = os.environ.get("BONFIRE_ID", cfg.get("BONFIRE_ID"))
     cfg["agent_id"] = os.environ.get("BONFIRE_AGENT_ID", cfg.get("BONFIRE_AGENT_ID"))
     cfg["api_key"] = os.environ.get("BONFIRE_API_KEY", cfg.get("BONFIRE_API_KEY"))
+    cfg["vault_dir"] = os.environ.get(
+        "BONFIRE_VAULT_DIR",
+        cfg.get("BONFIRE_VAULT_DIR", str(Path.home() / "Vaults" / "Bonfires" / "vault")),
+    )
+    cfg["group_id"] = f"{cfg['bonfire_id']}:{cfg['agent_id']}"
 
     missing = [k for k in ("bonfire_id", "agent_id", "api_key") if not cfg.get(k)]
     if missing:
