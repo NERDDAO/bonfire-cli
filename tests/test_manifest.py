@@ -1,7 +1,6 @@
 """Tests for kEngram manifest operations."""
 
 import json
-from datetime import datetime, timezone
 
 from bonfires.kengram.manifest import KEngramManifest
 

@@ -118,19 +118,29 @@ curl -s ... | bonfire format-chat
 
 ### `bonfire kengram`
 
-Manage verifiable knowledge subgraphs — curated projections of the canonical Bonfires KG.
+Manage kEngrams — verifiable knowledge subgraphs. Each kEngram is a curated projection of the canonical Bonfires KG with cryptographic provenance: every pinned entity gets a SHA-256 fingerprint of its content at pin time, rolled into a merkle root.
 
 ```bash
-bonfire kengram new "Session Name"     # create and set active
-bonfire kengram pin <uuid> --name X    # pin a KG entity
-bonfire kengram show                   # show active kEngram
-bonfire kengram verify                 # check merkle root integrity
-bonfire kengram merge <src> --into <tgt>  # merge session → topic
-bonfire kengram export                 # export to .canvas
-bonfire kengram list                   # list all
+bonfire kengram new "Session Name"             # create and set active
+bonfire kengram pin <uuid>                     # pin entity (auto-fetches from KG)
+bonfire kengram pin --search "rubric pipeline" # search KG, pick from results
+bonfire kengram create "Entity" --summary "…"  # push new entity to KG + pin
+bonfire kengram verify                         # check against canonical KG
+bonfire kengram verify --local                 # local-only integrity check
+bonfire kengram delete <id> --force            # remove a kEngram
+bonfire kengram show                           # show active kEngram
+bonfire kengram merge <src> --into <tgt>       # merge session → topic
+bonfire kengram export                         # export to Obsidian .canvas
+bonfire kengram list                           # list all
 ```
 
+**How verification works:** `verify` batch-fetches all pinned entities from the canonical KG, recomputes their hashes from current KG content, and compares against the stored hashes. Per-entity status: **OK** (unchanged), **DRIFT** (KG content changed since pin), **NOT IN KG** (entity deleted). If the API is unreachable, falls back to local-only integrity checking.
+
+**Pin modes:** Provide a UUID to auto-fetch entity metadata from the KG. Use `--search` to find entities interactively. Use `--name`/`--summary`/`--labels` for manual metadata (fallback if API is down).
+
 Set `BONFIRE_VAULT_DIR` to control where manifests and canvas files are stored (default: `~/Vaults/Bonfires/vault`).
+
+![kEngram API Bridge](docs/kengram-api-bridge.svg)
 
 ## Configuration
 
@@ -146,3 +156,4 @@ Config is loaded in this order (later overrides earlier):
 | `BONFIRE_ID` | Your bonfire ID |
 | `BONFIRE_AGENT_ID` | Agent ID to interact with |
 | `BONFIRE_API_KEY` | API key for authentication |
+| `BONFIRE_VAULT_DIR` | kEngram storage directory (default: `~/Vaults/Bonfires/vault`) |

@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 900" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 12 8" refX="12" refY="4" markerWidth="12" markerHeight="8" orient="auto">
+      <path d="M0 0 L12 4 L0 8 z" fill="#60a5fa"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 12 8" refX="12" refY="4" markerWidth="12" markerHeight="8" orient="auto">
+      <path d="M0 0 L12 4 L0 8 z" fill="#4ade80"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 12 8" refX="12" refY="4" markerWidth="12" markerHeight="8" orient="auto">
+      <path d="M0 0 L12 4 L0 8 z" fill="#fb923c"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 12 8" refX="12" refY="4" markerWidth="12" markerHeight="8" orient="auto">
+      <path d="M0 0 L12 4 L0 8 z" fill="#f87171"/>
+    </marker>
+    <marker id="ap" viewBox="0 0 12 8" refX="12" refY="4" markerWidth="12" markerHeight="8" orient="auto">
+      <path d="M0 0 L12 4 L0 8 z" fill="#c084fc"/>
+    </marker>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1000" height="900" fill="#0c0e1a" rx="0"/>
+
+  <!-- Title -->
+  <text x="500" y="45" text-anchor="middle" fill="#e2e8f0" font-size="22" font-weight="800" letter-spacing="0.5">How kEngrams Verify Knowledge</text>
+  <text x="500" y="70" text-anchor="middle" fill="#475569" font-size="13">Each entity pinned to a kEngram carries a cryptographic fingerprint of its KG state at pin time</text>
+
+  <!-- ============================================================ -->
+  <!-- LEFT SIDE: THE CANONICAL KG (source of truth)                -->
+  <!-- ============================================================ -->
+  <rect x="40" y="110" width="400" height="280" rx="14" fill="#0f172a" stroke="#6366f1" stroke-width="2"/>
+  <text x="240" y="140" text-anchor="middle" fill="#a5b4fc" font-size="15" font-weight="700">Canonical Knowledge Graph</text>
+  <text x="240" y="158" text-anchor="middle" fill="#4b5563" font-size="10">Bonfires API — the single source of truth</text>
+
+  <!-- Entity boxes inside KG -->
+  <rect x="65" y="180" width="160" height="80" rx="8" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+  <text x="145" y="205" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="600">Rubric Pipeline</text>
+  <text x="145" y="222" text-anchor="middle" fill="#6b7280" font-size="9">[Entity, Process]</text>
+  <text x="145" y="238" text-anchor="middle" fill="#6b7280" font-size="9">uuid: abc-123</text>
+  <text x="145" y="252" text-anchor="middle" fill="#6b7280" font-size="9">summary: "Evaluates..."</text>
+
+  <rect x="255" y="180" width="160" height="80" rx="8" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.2"/>
+  <text x="335" y="205" text-anchor="middle" fill="#c4b5fd" font-size="11" font-weight="600">Review Agent</text>
+  <text x="335" y="222" text-anchor="middle" fill="#6b7280" font-size="9">[Entity, Agent]</text>
+  <text x="335" y="238" text-anchor="middle" fill="#6b7280" font-size="9">uuid: def-456</text>
+  <text x="335" y="252" text-anchor="middle" fill="#6b7280" font-size="9">summary: "Reviews..."</text>
+
+  <!-- Edge between entities -->
+  <line x1="225" y1="220" x2="255" y2="220" stroke="#818cf8" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="240" y="215" text-anchor="middle" fill="#818cf8" font-size="7">USES</text>
+
+  <!-- "living, changing" note -->
+  <rect x="70" y="280" width="340" height="36" rx="6" fill="#1a1625" stroke="#4c1d95" stroke-width="1"/>
+  <text x="240" y="298" text-anchor="middle" fill="#8b5cf6" font-size="10">Entities change over time — names edited, summaries updated</text>
+  <text x="240" y="310" text-anchor="middle" fill="#6b7280" font-size="9">The KG is alive. How do you prove what you saw?</text>
+
+  <!-- API endpoints label -->
+  <text x="70" y="365" fill="#6366f1" font-size="9" font-weight="600">API:</text>
+  <text x="105" y="365" fill="#a5b4fc" font-size="9" font-family="monospace">GET /entity/{uuid}  POST /entities/batch  POST /delve  POST /entity</text>
+
+  <!-- ============================================================ -->
+  <!-- RIGHT SIDE: LOCAL KENGRAM MANIFEST                           -->
+  <!-- ============================================================ -->
+  <rect x="560" y="110" width="400" height="280" rx="14" fill="#0f172a" stroke="#f59e0b" stroke-width="2"/>
+  <text x="760" y="140" text-anchor="middle" fill="#fbbf24" font-size="15" font-weight="700">Local kEngram Manifest</text>
+  <text x="760" y="158" text-anchor="middle" fill="#4b5563" font-size="10">Your curated snapshot — stored in vault/kengrams/</text>
+
+  <!-- Manifest content -->
+  <rect x="585" y="175" width="350" height="130" rx="8" fill="#1c1917" stroke="#78716c" stroke-width="1"/>
+  <text x="605" y="198" fill="#a8a29e" font-size="10" font-family="monospace">pinned_nodes:</text>
+  <text x="625" y="214" fill="#fcd34d" font-size="10" font-family="monospace">- abc-123  (Rubric Pipeline)</text>
+  <text x="625" y="230" fill="#fcd34d" font-size="10" font-family="monospace">- def-456  (Review Agent)</text>
+  <text x="605" y="252" fill="#a8a29e" font-size="10" font-family="monospace">node_hashes:</text>
+  <text x="625" y="268" fill="#fb923c" font-size="10" font-family="monospace">abc-123: 7f3a2b...</text>
+  <text x="625" y="284" fill="#fb923c" font-size="10" font-family="monospace">def-456: e91c4d...</text>
+  <text x="605" y="300" fill="#a8a29e" font-size="10" font-family="monospace">merkle_root: </text>
+  <text x="725" y="300" fill="#ef4444" font-size="10" font-family="monospace" font-weight="700">a4f82e...</text>
+
+  <!-- Hash explanation -->
+  <rect x="585" y="320" width="350" height="44" rx="6" fill="#1a1207" stroke="#854d0e" stroke-width="1"/>
+  <text x="760" y="338" text-anchor="middle" fill="#f59e0b" font-size="10">hash = SHA-256( uuid | name | summary | labels )</text>
+  <text x="760" y="354" text-anchor="middle" fill="#6b7280" font-size="9">Fingerprint of exactly what the entity contained when pinned</text>
+
+  <!-- ============================================================ -->
+  <!-- CENTER: THE THREE FLOWS                                      -->
+  <!-- ============================================================ -->
+
+  <!-- ── FLOW 1: PIN ── -->
+  <rect x="40" y="420" width="295" height="220" rx="12" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <rect x="40" y="420" width="295" height="32" rx="12" fill="#1e3a5f"/>
+  <rect x="40" y="440" width="295" height="12" fill="#1e3a5f"/>
+  <text x="187" y="442" text-anchor="middle" fill="#60a5fa" font-size="13" font-weight="700">PIN — Snapshot an Entity</text>
+
+  <!-- Step boxes -->
+  <rect x="60" y="468" width="255" height="28" rx="5" fill="#172554" stroke="#1e40af" stroke-width="1"/>
+  <text x="75" y="486" fill="#93c5fd" font-size="10">1</text>
+  <text x="95" y="486" fill="#bfdbfe" font-size="10">User runs  bonfire kengram pin &lt;uuid&gt;</text>
+
+  <path d="M187 496 L187 504" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="60" y="508" width="255" height="28" rx="5" fill="#172554" stroke="#1e40af" stroke-width="1"/>
+  <text x="75" y="526" fill="#93c5fd" font-size="10">2</text>
+  <text x="95" y="526" fill="#bfdbfe" font-size="10">Fetch entity from KG API (name, labels...)</text>
+
+  <path d="M187 536 L187 544" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="60" y="548" width="255" height="28" rx="5" fill="#172554" stroke="#1e40af" stroke-width="1"/>
+  <text x="75" y="566" fill="#93c5fd" font-size="10">3</text>
+  <text x="95" y="566" fill="#bfdbfe" font-size="10">SHA-256 hash the entity content</text>
+
+  <path d="M187 576 L187 584" stroke="#3b82f6" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <rect x="60" y="588" width="255" height="28" rx="5" fill="#172554" stroke="#1e40af" stroke-width="1"/>
+  <text x="75" y="606" fill="#93c5fd" font-size="10">4</text>
+  <text x="95" y="606" fill="#bfdbfe" font-size="10">Store hash, recompute merkle root</text>
+
+  <text x="187" y="634" text-anchor="middle" fill="#475569" font-size="9">If API unreachable: falls back to manual --name/--summary</text>
+
+  <!-- ── FLOW 2: VERIFY ── -->
+  <rect x="353" y="420" width="295" height="220" rx="12" fill="#0f172a" stroke="#22c55e" stroke-width="1.5"/>
+  <rect x="353" y="420" width="295" height="32" rx="12" fill="#14532d"/>
+  <rect x="353" y="440" width="295" height="12" fill="#14532d"/>
+  <text x="500" y="442" text-anchor="middle" fill="#4ade80" font-size="13" font-weight="700">VERIFY — Check for Drift</text>
+
+  <rect x="373" y="468" width="255" height="28" rx="5" fill="#052e16" stroke="#166534" stroke-width="1"/>
+  <text x="388" y="486" fill="#86efac" font-size="10">1</text>
+  <text x="408" y="486" fill="#bbf7d0" font-size="10">Batch-fetch all pinned entities from KG</text>
+
+  <path d="M500 496 L500 504" stroke="#22c55e" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <rect x="373" y="508" width="255" height="28" rx="5" fill="#052e16" stroke="#166534" stroke-width="1"/>
+  <text x="388" y="526" fill="#86efac" font-size="10">2</text>
+  <text x="408" y="526" fill="#bbf7d0" font-size="10">Re-hash each entity from KG content</text>
+
+  <path d="M500 536 L500 544" stroke="#22c55e" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <rect x="373" y="548" width="255" height="28" rx="5" fill="#052e16" stroke="#166534" stroke-width="1"/>
+  <text x="388" y="566" fill="#86efac" font-size="10">3</text>
+  <text x="408" y="566" fill="#bbf7d0" font-size="10">Compare KG hash vs stored hash per node</text>
+
+  <path d="M500 576 L500 584" stroke="#22c55e" stroke-width="1.5" marker-end="url(#ag)"/>
+
+  <rect x="373" y="588" width="255" height="28" rx="5" fill="#052e16" stroke="#166534" stroke-width="1"/>
+  <text x="388" y="606" fill="#86efac" font-size="10">4</text>
+  <text x="408" y="606" fill="#bbf7d0" font-size="10">Build KG merkle root, compare to stored</text>
+
+  <text x="500" y="634" text-anchor="middle" fill="#475569" font-size="9">If API unreachable: --local flag does local-only integrity check</text>
+
+  <!-- ── FLOW 3: CREATE ── -->
+  <rect x="666" y="420" width="295" height="220" rx="12" fill="#0f172a" stroke="#f59e0b" stroke-width="1.5"/>
+  <rect x="666" y="420" width="295" height="32" rx="12" fill="#451a03"/>
+  <rect x="666" y="440" width="295" height="12" fill="#451a03"/>
+  <text x="813" y="442" text-anchor="middle" fill="#fbbf24" font-size="13" font-weight="700">CREATE — Push + Pin</text>
+
+  <rect x="686" y="468" width="255" height="28" rx="5" fill="#431407" stroke="#9a3412" stroke-width="1"/>
+  <text x="701" y="486" fill="#fdba74" font-size="10">1</text>
+  <text x="721" y="486" fill="#fed7aa" font-size="10">User defines name, labels, summary</text>
+
+  <path d="M813 496 L813 504" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <rect x="686" y="508" width="255" height="28" rx="5" fill="#431407" stroke="#9a3412" stroke-width="1"/>
+  <text x="701" y="526" fill="#fdba74" font-size="10">2</text>
+  <text x="721" y="526" fill="#fed7aa" font-size="10">POST to KG API — entity created</text>
+
+  <path d="M813 536 L813 544" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <rect x="686" y="548" width="255" height="28" rx="5" fill="#431407" stroke="#9a3412" stroke-width="1"/>
+  <text x="701" y="566" fill="#fdba74" font-size="10">3</text>
+  <text x="721" y="566" fill="#fed7aa" font-size="10">KG returns UUID for new entity</text>
+
+  <path d="M813 576 L813 584" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#ao)"/>
+
+  <rect x="686" y="588" width="255" height="28" rx="5" fill="#431407" stroke="#9a3412" stroke-width="1"/>
+  <text x="701" y="606" fill="#fdba74" font-size="10">4</text>
+  <text x="721" y="606" fill="#fed7aa" font-size="10">Pin locally with UUID + hash</text>
+
+  <text x="813" y="634" text-anchor="middle" fill="#475569" font-size="9">No fallback — entities must exist in canonical KG</text>
+
+  <!-- ============================================================ -->
+  <!-- BOTTOM: WHAT VERIFY FINDS                                    -->
+  <!-- ============================================================ -->
+  <rect x="40" y="670" width="920" height="200" rx="14" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <text x="500" y="700" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">What Verify Tells You</text>
+
+  <!-- OK scenario -->
+  <rect x="65" y="720" width="260" height="120" rx="10" fill="#052e16" stroke="#16a34a" stroke-width="1.5"/>
+  <circle cx="90" cy="745" r="10" fill="#22c55e" filter="url(#glow)"/>
+  <text x="108" y="750" fill="#4ade80" font-size="13" font-weight="700">OK — No Change</text>
+  <text x="85" y="775" fill="#86efac" font-size="10">KG entity is identical to when you</text>
+  <text x="85" y="790" fill="#86efac" font-size="10">pinned it. Hash matches perfectly.</text>
+  <text x="85" y="815" fill="#6b7280" font-size="9">hash(KG now) == hash(stored at pin time)</text>
+  <text x="85" y="830" fill="#4b5563" font-size="9">Your snapshot is still valid.</text>
+
+  <!-- DRIFT scenario -->
+  <rect x="370" y="720" width="260" height="120" rx="10" fill="#451a03" stroke="#d97706" stroke-width="1.5"/>
+  <circle cx="395" cy="745" r="10" fill="#f59e0b" filter="url(#glow)"/>
+  <text x="413" y="750" fill="#fbbf24" font-size="13" font-weight="700">DRIFT — Changed</text>
+  <text x="390" y="775" fill="#fcd34d" font-size="10">Someone edited this entity in the KG</text>
+  <text x="390" y="790" fill="#fcd34d" font-size="10">since you pinned it. Content differs.</text>
+  <text x="390" y="815" fill="#6b7280" font-size="9">hash(KG now) != hash(stored at pin time)</text>
+  <text x="390" y="830" fill="#4b5563" font-size="9">Re-pin to update, or investigate the change.</text>
+
+  <!-- NOT IN KG scenario -->
+  <rect x="675" y="720" width="260" height="120" rx="10" fill="#450a0a" stroke="#dc2626" stroke-width="1.5"/>
+  <circle cx="700" cy="745" r="10" fill="#ef4444" filter="url(#glow)"/>
+  <text x="718" y="750" fill="#f87171" font-size="13" font-weight="700">NOT IN KG — Gone</text>
+  <text x="695" y="775" fill="#fca5a5" font-size="10">Entity was deleted or merged in the</text>
+  <text x="695" y="790" fill="#fca5a5" font-size="10">canonical KG. Your pin is orphaned.</text>
+  <text x="695" y="815" fill="#6b7280" font-size="9">Entity UUID no longer exists in KG</text>
+  <text x="695" y="830" fill="#4b5563" font-size="9">Unpin the stale reference.</text>
+
+  <!-- Connecting arrows from KG to PIN flow -->
+  <path d="M240 390 L240 400 Q240 410 230 410 L187 410 Q177 410 177 420 L177 420" stroke="#3b82f6" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#a)"/>
+
+  <!-- Connecting arrows from KG to VERIFY flow -->
+  <path d="M300 390 L300 400 Q300 410 310 410 L500 410 Q510 410 510 420" stroke="#22c55e" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#ag)"/>
+
+  <!-- Connecting arrows from Manifest to VERIFY -->
+  <path d="M760 390 L760 400 Q760 410 750 410 L510 410 Q500 410 500 420" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#ao)"/>
+
+  <!-- Connecting arrows from CREATE to KG -->
+  <path d="M813 420 L813 400 Q813 390 803 390 L450 390 Q440 390 440 380 L440 370" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="5,4" marker-end="url(#ao)"/>
+
+  <!-- Merkle root note -->
+  <text x="500" y="890" text-anchor="middle" fill="#374151" font-size="10">Merkle root = SHA-256 binary tree over all node + edge hashes. Any single change cascades to a different root.</text>
+</svg>
