@@ -707,7 +707,15 @@ def create(name: str, labels: str, summary: str, output_json: bool) -> None:
             _json_error(msg)
         console.print(f"[red]{msg}[/red]")
         return
-    manifest.pin_node(uuid=uuid, name=name, summary=summary, labels=label_list)
+    # Fetch back from KG to get canonical labels (server may add Entity, etc.)
+    entity = kg_client.fetch_entity(cfg, uuid)
+    if entity:
+        pin_name = str(entity.get("name", name))
+        pin_summary = str(entity.get("summary", summary))
+        pin_labels = list(entity.get("labels", label_list))
+    else:
+        pin_name, pin_summary, pin_labels = name, summary, label_list
+    manifest.pin_node(uuid=uuid, name=pin_name, summary=pin_summary, labels=pin_labels)
     store.save(manifest)
     if output_json:
         click.echo(json.dumps({
