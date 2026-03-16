@@ -520,10 +520,10 @@ def delete(kengram_id: str, force: bool, output_json: bool):
 
 @kengram.command()
 @click.argument("kengram_id", required=False)
-@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas"]))
+@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas", "plan"]))
 @_json_flag
 def export(kengram_id: str | None, fmt: str, output_json: bool):
-    """Export a kEngram to Obsidian canvas format."""
+    """Export a kEngram to Obsidian canvas or markdown plan format."""
     store = _get_storage()
     if kengram_id:
         manifest = store.load(kengram_id)
@@ -556,6 +556,18 @@ def export(kengram_id: str | None, fmt: str, output_json: bool):
                 "name": parts[2],
                 "fact": "",
             })
+    if fmt == "plan":
+        from bonfires.kengram.plan_export import export_plan
+
+        md = export_plan(manifest, entities, edges)
+        plan_path = store.save_plan(manifest.id, manifest.name, md)
+        if output_json:
+            click.echo(json.dumps({"status": "exported", "id": manifest.id, "path": str(plan_path)}))
+            return
+        console.print(f"[green]Exported[/green] {manifest.id} → {plan_path}")
+        return
+
+    # Canvas format (default)
     # Run verify to get per-node KG sync status for coloring
     node_status = _verify_for_export(manifest)
     canvas_data = export_canvas(manifest, entities=entities, edges=edges, node_status=node_status)
@@ -684,6 +696,67 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
         console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
         console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
         console.print(f"  Recomputed root: [dim]{recomputed[:16]}...[/dim]")
+
+    # Plan structural verification: check if this is a plan kEngram (has Goal entity)
+    _verify_plan_structure(manifest, output_json)
+
+
+def _verify_plan_structure(manifest: KEngramManifest, output_json: bool) -> None:
+    """Check plan-specific structure: orphan tasks and DEPENDS_ON cycles."""
+    goal_nodes = [
+        u for u in manifest.pinned_nodes
+        if "Goal" in (manifest._node_meta.get(u, {}).get("labels", []))
+    ]
+    if not goal_nodes:
+        return
+
+    task_nodes = [
+        u for u in manifest.pinned_nodes
+        if "Task" in (manifest._node_meta.get(u, {}).get("labels", []))
+        and "Goal" not in (manifest._node_meta.get(u, {}).get("labels", []))
+    ]
+    if not task_nodes:
+        return
+
+    if not output_json:
+        console.print("\n[bold]Plan structure:[/bold]")
+
+    # Check all tasks reachable from Goal via DECOMPOSES_INTO
+    decomp_targets: set[str] = set()
+    for key in manifest.pinned_edges:
+        parts = key.split(":", 2)
+        if len(parts) == 3 and parts[2] == "DECOMPOSES_INTO":
+            decomp_targets.add(parts[1])
+    orphans = [u for u in task_nodes if u not in decomp_targets]
+    if orphans and not output_json:
+        console.print(
+            f"  [yellow]Warning:[/yellow] {len(orphans)} task(s) not linked"
+            " from Goal via DECOMPOSES_INTO"
+        )
+
+    # Check DEPENDS_ON is a DAG (no cycles) via topological sort
+    from bonfires.kengram.plan_export import topological_sort
+
+    depends_edges: list[dict[str, str]] = []
+    for key in manifest.pinned_edges:
+        parts = key.split(":", 2)
+        if len(parts) == 3 and parts[2] == "DEPENDS_ON":
+            depends_edges.append({
+                "source_node_uuid": parts[0],
+                "target_node_uuid": parts[1],
+                "name": "DEPENDS_ON",
+            })
+    sorted_uuids = topological_sort(task_nodes, depends_edges)
+    # If any task wasn't placed by the sort, it's in a cycle
+    cycle_members = [u for u in task_nodes if u not in sorted_uuids[:len(task_nodes)]]
+    if not output_json:
+        if cycle_members:
+            console.print(
+                f"  [red]Error:[/red] DEPENDS_ON cycle detected"
+                f" involving {len(cycle_members)} task(s)"
+            )
+        elif not orphans:
+            console.print("  [green]OK[/green] All tasks linked, no dependency cycles")
 
 
 @kengram.command()
