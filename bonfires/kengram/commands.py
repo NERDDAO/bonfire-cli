@@ -670,6 +670,7 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
                 console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
                 console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
                 console.print(f"  Recomputed root: [dim]{recomputed[:16]}...[/dim]")
+            _verify_plan_structure(manifest, output_json)
             return
 
     # Local-only verification (--local flag or API fallback or no pinned nodes)
