@@ -811,21 +811,6 @@ def test_batch_from_file(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _create_kengram_with_node_and_edge(runner, tmp_path):
-    """Helper: create a kEngram with two nodes and one edge."""
-    runner.invoke(cli, ["kengram", "new", "Push Test"])
-    runner.invoke(
-        cli, ["kengram", "pin", "push-1", "--name", "Alpha", "--summary", "First", "--labels", "Entity"]
-    )
-    runner.invoke(
-        cli, ["kengram", "pin", "push-2", "--name", "Beta", "--summary", "Second", "--labels", "Entity"]
-    )
-    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
-        mock_kg.create_edge.return_value = {"status": "ok"}
-        runner.invoke(
-            cli, ["kengram", "edge", "push-1", "push-2", "--name", "USES", "--local"]
-        )
-
 
 def test_push_nodes_not_in_kg(tmp_path):
     """push creates nodes that don't exist in KG and skips those that do."""
@@ -839,7 +824,7 @@ def test_push_nodes_not_in_kg(tmp_path):
     )
     with patch("bonfires.kengram.commands.kg_client") as mock_kg:
         # p-new is not in KG, p-exists is
-        mock_kg.fetch_entity.side_effect = lambda cfg, uuid: (
+        mock_kg.fetch_entity.side_effect = lambda _cfg, uuid: (
             {"uuid": uuid, "name": "ExistingNode", "summary": "Already in KG", "labels": ["Entity"]}
             if uuid == "p-exists"
             else None
@@ -919,6 +904,63 @@ def test_push_repins_pushed_nodes(tmp_path):
     assert data["node_meta"]["rp-push"]["name"] == "Canonical"
 
 
+def test_push_create_entity_returns_none(tmp_path):
+    """push counts node as skipped when create_entity returns None (API failure)."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Create Fail"])
+    runner.invoke(
+        cli, ["kengram", "pin", "cf-1", "--name", "FailNode", "--summary", "will fail", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        # Node is not in KG, but create_entity returns None (creation failed)
+        mock_kg.fetch_entity.return_value = None
+        mock_kg.create_entity.return_value = None
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    assert "Pushed" in result.output
+    mock_kg.create_entity.assert_called_once()
+    # fetch_entity should only be called once (existence check), not again for repin
+    mock_kg.fetch_entity.assert_called_once()
+    # Output should show 0 pushed, 1 skipped
+    assert "0" in result.output  # nodes_pushed = 0
+
+
+def test_push_repins_with_different_canonical_uuid(tmp_path):
+    """push migrates manifest entries when server returns a different canonical UUID."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push UUID Remap"])
+    runner.invoke(
+        cli, ["kengram", "pin", "local-uuid-1", "--name", "MyNode", "--summary", "desc", "--labels", "Entity"]
+    )
+    canonical = {
+        "uuid": "server-uuid-1",
+        "name": "MyNode",
+        "summary": "desc",
+        "labels": ["Entity"],
+    }
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        # First fetch (existence check): not in KG
+        # Second fetch (repin, called with server-uuid-1): returns canonical
+        mock_kg.fetch_entity.side_effect = [None, canonical]
+        mock_kg.create_entity.return_value = "server-uuid-1"
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    # Manifest should now use server-uuid-1, not local-uuid-1
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    assert len(manifests) == 1
+    import json as _json
+    data = _json.loads(manifests[0].read_text())
+    assert "server-uuid-1" in data["node_meta"]
+    assert "local-uuid-1" not in data["node_meta"]
+    assert "server-uuid-1" in data.get("pinned_nodes", [])
+    assert "local-uuid-1" not in data.get("pinned_nodes", [])
+    # Second fetch must have been called with the server UUID
+    second_fetch_call = mock_kg.fetch_entity.call_args_list[1]
+    assert second_fetch_call.args[1] == "server-uuid-1"
+
+
 def test_push_with_id_option(tmp_path):
     """push --id targets a specific kEngram."""
     runner = CliRunner(env=_env_overrides(tmp_path))
@@ -960,7 +1002,7 @@ def test_json_push(tmp_path):
     with patch("bonfires.kengram.commands.kg_client") as mock_kg:
         # pj-1 not in KG (push it), pj-2 already in KG (skip)
         # After push of pj-1, fetch is called again for repin → returns canonical_node
-        mock_kg.fetch_entity.side_effect = lambda cfg, uuid: (
+        mock_kg.fetch_entity.side_effect = lambda _cfg, uuid: (
             {"uuid": uuid, "name": "Node2", "summary": "s", "labels": ["Entity"]}
             if uuid == "pj-2"
             else (canonical_node if mock_kg.create_entity.called else None)
@@ -989,6 +1031,74 @@ def test_json_push_no_active(tmp_path):
     assert result.exit_code != 0
     data = json.loads(result.output)
     assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# push --changes tests
+# ---------------------------------------------------------------------------
+
+
+def test_push_with_changes_updates_dirty_nodes(tmp_path):
+    """push --changes updates dirty nodes and creates new ones."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Changes"])
+    runner.invoke(
+        cli, ["kengram", "pin", "dirty-1", "--name", "OldName", "--summary", "old", "--labels", "Entity"]
+    )
+    changes = json.dumps({
+        "dirty": {
+            "dirty-1": {"name": "NewName", "summary": "updated", "labels": ["Entity", "Modified"]}
+        },
+        "new_nodes": {
+            "canvas-new-1": {"name": "BrandNew", "summary": "fresh", "labels": ["Concept"]}
+        },
+        "new_edges": [
+            {"from": "dirty-1", "to": "canvas-new-1", "label": "RELATES_TO"}
+        ],
+    })
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "dirty-1", "name": "OldName", "summary": "old", "labels": ["Entity"]
+        }
+        mock_kg.update_entity.return_value = {"success": True, "uuid": "dirty-1"}
+        mock_kg.create_entity.return_value = "new-uuid-1"
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        result = runner.invoke(cli, ["kengram", "push", "--changes", changes, "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["nodes_updated"] == 1
+    assert data["nodes_created"] == 1
+    assert data["edges_created"] == 1
+
+
+def test_push_with_changes_invalid_json(tmp_path):
+    """push --changes with invalid JSON silently skips canvas changes."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Bad Changes"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = None
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push", "--changes", "not-valid-json", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["nodes_updated"] == 0
+    assert data["nodes_created"] == 0
+    assert data["edges_created"] == 0
+
+
+def test_push_with_changes_no_changes_flag(tmp_path):
+    """push without --changes sets updated/created/edges_created to 0 in JSON output."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push No Changes"])
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = None
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["nodes_updated"] == 0
+    assert data["nodes_created"] == 0
+    assert data["edges_created"] == 0
 
 
 # ---------------------------------------------------------------------------

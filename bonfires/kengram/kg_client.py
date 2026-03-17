@@ -88,6 +88,30 @@ def create_entity(
         return None
 
 
+def update_entity(
+    cfg: dict[str, Any],
+    uuid: str,
+    name: str,
+    labels: list[str],
+    summary: str,
+) -> dict[str, Any] | None:
+    """Update an existing entity's name, summary, and labels."""
+    try:
+        result = api_post(
+            cfg,
+            f"/knowledge_graph/entity/{uuid}/update",
+            body={
+                "bonfire_id": cfg["bonfire_id"],
+                "name": name,
+                "labels": labels,
+                "summary": summary,
+            },
+        )
+        return result if isinstance(result, dict) else None
+    except SystemExit:
+        return None
+
+
 def create_edge(
     cfg: dict[str, Any],
     source_uuid: str,

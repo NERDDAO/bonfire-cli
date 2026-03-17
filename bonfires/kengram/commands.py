@@ -992,8 +992,9 @@ def create(name: str, labels: str, summary: str, output_json: bool) -> None:
 
 @kengram.command()
 @click.option("--id", "target_id", default=None, help="kEngram ID (default: active).")
+@click.option("--changes", "changes_json", default=None, help="JSON describing canvas modifications.")
 @_json_flag
-def push(target_id: str | None, output_json: bool) -> None:
+def push(target_id: str | None, changes_json: str | None, output_json: bool) -> None:
     """Push local-only nodes and edges to the canonical KG."""
     from bonfires.kengram.hashing import hash_node
 
@@ -1014,7 +1015,7 @@ def push(target_id: str | None, output_json: bool) -> None:
 
     nodes_pushed = 0
     nodes_skipped = 0
-    pushed_uuids: list[str] = []
+    pushed_uuid_pairs: list[tuple[str, str]] = []
 
     for node_uuid in manifest.pinned_nodes:
         existing = kg_client.fetch_entity(cfg, node_uuid)
@@ -1029,26 +1030,33 @@ def push(target_id: str | None, output_json: bool) -> None:
         result_uuid = kg_client.create_entity(cfg, node_name, node_labels, attributes)
         if result_uuid is not None:
             nodes_pushed += 1
-            pushed_uuids.append(node_uuid)
+            pushed_uuid_pairs.append((node_uuid, result_uuid))
         else:
             nodes_skipped += 1
 
     # Re-pin pushed nodes: fetch canonical data back and update hashes
-    for node_uuid in pushed_uuids:
-        entity = kg_client.fetch_entity(cfg, node_uuid)
+    for local_uuid, canonical_uuid in pushed_uuid_pairs:
+        entity = kg_client.fetch_entity(cfg, canonical_uuid)
         if entity:
             new_name = str(entity.get("name", ""))
             new_summary = str(entity.get("summary", ""))
             new_labels = list(entity.get("labels", []))
-            new_hash = hash_node(node_uuid, new_name, new_summary, new_labels)
-            manifest._node_hashes[node_uuid] = new_hash
-            manifest._node_meta[node_uuid] = {
+            new_hash = hash_node(canonical_uuid, new_name, new_summary, new_labels)
+            if canonical_uuid != local_uuid:
+                # Server assigned a different canonical UUID — migrate manifest entries
+                manifest._node_hashes.pop(local_uuid, None)
+                manifest._node_meta.pop(local_uuid, None)
+                if local_uuid in manifest.pinned_nodes:
+                    manifest.pinned_nodes.remove(local_uuid)
+                    manifest.pinned_nodes.append(canonical_uuid)
+            manifest._node_hashes[canonical_uuid] = new_hash
+            manifest._node_meta[canonical_uuid] = {
                 "name": new_name,
                 "summary": new_summary,
                 "labels": new_labels,
             }
 
-    if pushed_uuids:
+    if pushed_uuid_pairs:
         manifest._recompute_merkle()
 
     edges_pushed = 0
@@ -1066,6 +1074,87 @@ def push(target_id: str | None, output_json: bool) -> None:
         else:
             edges_skipped += 1
 
+    # --- Canvas changes processing ---
+    nodes_updated = 0
+    nodes_created = 0
+    edges_created = 0
+
+    if changes_json:
+        try:
+            changes = json.loads(changes_json)
+        except json.JSONDecodeError:
+            changes = {}
+
+        dirty = changes.get("dirty", {})
+        new_nodes = changes.get("new_nodes", {})
+        new_edges = changes.get("new_edges", [])
+
+        # 1. Update dirty (modified) nodes
+        for node_uuid, node_data in dirty.items():
+            node_name = str(node_data.get("name", ""))
+            node_summary = str(node_data.get("summary", ""))
+            node_labels = list(node_data.get("labels", []))
+            result = kg_client.update_entity(cfg, node_uuid, node_name, node_labels, node_summary)
+            if result is not None:
+                nodes_updated += 1
+                # Audit edge: record modification in KG
+                kg_client.create_edge(
+                    cfg,
+                    node_uuid,
+                    node_uuid,
+                    "MODIFIED_VIA_KENGRAM",
+                    f"Entity updated via kEngram canvas: name='{node_name}', labels={node_labels}",
+                )
+                # Re-pin: update manifest hash and meta
+                new_hash = hash_node(node_uuid, node_name, node_summary, node_labels)
+                manifest._node_hashes[node_uuid] = new_hash
+                manifest._node_meta[node_uuid] = {
+                    "name": node_name,
+                    "summary": node_summary,
+                    "labels": node_labels,
+                }
+
+        # 2. Create new canvas nodes
+        canvas_id_to_uuid: dict[str, str] = {}
+        for canvas_id, node_data in new_nodes.items():
+            node_name = str(node_data.get("name", ""))
+            node_summary = str(node_data.get("summary", ""))
+            node_labels = list(node_data.get("labels", []))
+            attributes: dict[str, Any] = {"summary": node_summary} if node_summary else {}
+            result_uuid = kg_client.create_entity(cfg, node_name, node_labels, attributes)
+            if result_uuid is not None:
+                nodes_created += 1
+                canvas_id_to_uuid[canvas_id] = result_uuid
+                # Pin to manifest
+                manifest.pinned_nodes.append(result_uuid)
+                new_hash = hash_node(result_uuid, node_name, node_summary, node_labels)
+                manifest._node_hashes[result_uuid] = new_hash
+                manifest._node_meta[result_uuid] = {
+                    "name": node_name,
+                    "summary": node_summary,
+                    "labels": node_labels,
+                }
+
+        # 3. Create new canvas edges
+        for edge_data in new_edges:
+            from_id = str(edge_data.get("from", ""))
+            to_id = str(edge_data.get("to", ""))
+            edge_label = str(edge_data.get("label", ""))
+            # Resolve canvas IDs to UUIDs for newly created nodes
+            from_uuid = canvas_id_to_uuid.get(from_id, from_id)
+            to_uuid = canvas_id_to_uuid.get(to_id, to_id)
+            if from_uuid and to_uuid and edge_label:
+                result = kg_client.create_edge(cfg, from_uuid, to_uuid, edge_label, "")
+                if result is not None:
+                    edges_created += 1
+                    # Pin edge to manifest
+                    edge_key = f"{from_uuid}:{to_uuid}:{edge_label}"
+                    manifest.pinned_edges.append(edge_key)
+                    manifest._edge_hashes[edge_key] = edge_key  # placeholder hash
+
+        if nodes_updated or nodes_created or edges_created:
+            manifest._recompute_merkle()
+
     store.save(manifest)
 
     if output_json:
@@ -1076,6 +1165,9 @@ def push(target_id: str | None, output_json: bool) -> None:
             "nodes_skipped": nodes_skipped,
             "edges_pushed": edges_pushed,
             "edges_skipped": edges_skipped,
+            "nodes_updated": nodes_updated,
+            "nodes_created": nodes_created,
+            "edges_created": edges_created,
             "merkle_root": manifest.merkle_root,
         }))
         return
@@ -1085,6 +1177,12 @@ def push(target_id: str | None, output_json: bool) -> None:
     console.print(f"  Nodes skipped: {nodes_skipped}")
     console.print(f"  Edges pushed:  {edges_pushed}")
     console.print(f"  Edges skipped: {edges_skipped}")
+    if nodes_updated:
+        console.print(f"  Nodes updated: {nodes_updated}")
+    if nodes_created:
+        console.print(f"  Nodes created: {nodes_created}")
+    if edges_created:
+        console.print(f"  Edges created: {edges_created}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
 
 
