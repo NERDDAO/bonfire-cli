@@ -121,3 +121,53 @@ def test_to_json_roundtrip():
     assert loaded.pinned_nodes == m.pinned_nodes
     assert loaded.merkle_root == m.merkle_root
     assert loaded.summary == m.summary
+
+
+def test_batch_mode_defers_merkle():
+    """In batch mode, pin_node and pin_edge do not recompute merkle until end_batch."""
+    m = KEngramManifest.create(name="Batch", kengram_type="session", group_id="g")
+    empty_root = m.merkle_root
+
+    m.begin_batch()
+    m.pin_node(uuid="n1", name="A", summary="a", labels=["Entity"])
+    # During batch, merkle root should NOT have changed
+    assert m.merkle_root == empty_root
+
+    m.pin_node(uuid="n2", name="B", summary="b", labels=["Entity"])
+    assert m.merkle_root == empty_root
+
+    m.pin_edge(source_uuid="n1", target_uuid="n2", name="USES", fact="fact")
+    assert m.merkle_root == empty_root
+
+    m.end_batch()
+    # After end_batch, merkle root should be recomputed
+    assert m.merkle_root != empty_root
+    assert len(m.pinned_nodes) == 2
+    assert len(m.pinned_edges) == 1
+
+
+def test_batch_mode_equals_sequential():
+    """Batch mode produces the same merkle root as sequential operations."""
+    # Sequential
+    seq = KEngramManifest.create(name="Seq", kengram_type="session", group_id="g")
+    seq.pin_node(uuid="n1", name="A", summary="a", labels=["Entity"])
+    seq.pin_node(uuid="n2", name="B", summary="b", labels=["Entity"])
+    seq.pin_edge(source_uuid="n1", target_uuid="n2", name="USES", fact="fact")
+
+    # Batch
+    batch = KEngramManifest.create(name="Batch", kengram_type="session", group_id="g")
+    batch.begin_batch()
+    batch.pin_node(uuid="n1", name="A", summary="a", labels=["Entity"])
+    batch.pin_node(uuid="n2", name="B", summary="b", labels=["Entity"])
+    batch.pin_edge(source_uuid="n1", target_uuid="n2", name="USES", fact="fact")
+    batch.end_batch()
+
+    assert batch.merkle_root == seq.merkle_root
+
+
+def test_batch_mode_flag_not_serialized():
+    """_batch_mode should not appear in serialized output."""
+    m = KEngramManifest.create(name="Test", kengram_type="session", group_id="g")
+    d = m.to_dict()
+    assert "_batch_mode" not in d
+    assert "batch_mode" not in d

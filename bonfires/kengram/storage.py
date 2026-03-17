@@ -7,6 +7,7 @@ The active kEngram ID is tracked in vault/kengrams/.active.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -71,4 +72,14 @@ class KEngramStorage:
         self.canvas_dir.mkdir(parents=True, exist_ok=True)
         path = self.canvas_dir / f"{kengram_id}.canvas"
         path.write_text(json.dumps(canvas_data, indent=2))
+        return path
+
+    def save_plan(self, kengram_id: str, name: str | None, markdown: str) -> Path:
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        slug = name.lower().replace(" ", "-")[:50] if name else kengram_id
+        filename = f"{date}-{slug}.md"
+        plan_dir = self.vault_dir / "kengrams" / "plans"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        path = plan_dir / filename
+        path.write_text(markdown)
         return path
