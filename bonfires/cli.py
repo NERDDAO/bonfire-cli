@@ -198,6 +198,9 @@ def init(api_url, api_key, bonfire_id, agent_id):
         border_style="green",
     ))
 
+    # Sync Claude Code skills from repo to ~/.claude/skills/
+    _sync_skills()
+
 
 @cli.command()
 @click.argument("message")
@@ -379,6 +382,43 @@ def sync(message, file_path, title):
         title="Sync Complete",
         border_style="green",
     ))
+
+
+def _sync_skills() -> None:
+    """Sync Claude Code skills from the repo's .claude/skills/ to ~/.claude/skills/."""
+    import hashlib
+    import shutil
+
+    repo_root = Path(__file__).resolve().parent.parent
+    source_dir = repo_root / ".claude" / "skills"
+    target_dir = Path.home() / ".claude" / "skills"
+
+    if not source_dir.exists():
+        return
+
+    skill_files = list(source_dir.rglob("*/SKILL.md"))
+    if not skill_files:
+        return
+
+    console.print()
+    console.print("[bold]Syncing Claude Code skills...[/bold]")
+    for skill_file in sorted(skill_files):
+        skill_name = skill_file.parent.name
+        target_path = target_dir / skill_name / "SKILL.md"
+
+        src_hash = hashlib.sha256(skill_file.read_bytes()).hexdigest()
+        if target_path.exists():
+            tgt_hash = hashlib.sha256(target_path.read_bytes()).hexdigest()
+            if src_hash == tgt_hash:
+                console.print(f"  [dim]OK[/dim]      {skill_name}")
+                continue
+
+        action = "Updated" if target_path.exists() else "Created"
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(skill_file, target_path)
+        console.print(f"  [green]{action}[/green]  {skill_name}")
+
+    console.print("[dim]  Skills ready.[/dim]")
 
 
 def _git_chat_id():

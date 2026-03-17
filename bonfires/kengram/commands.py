@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid as _uuid_mod
 from typing import Any, NoReturn
 
 import click
@@ -285,8 +286,9 @@ def unpin(uuid: str, source_id: str | None, output_json: bool):
 @click.argument("target")
 @click.option("--name", "edge_name", required=True, help="Relationship name (e.g. USES, PRODUCES).")
 @click.option("--fact", default="", help="Relationship description.")
+@click.option("--local", "local_only", is_flag=True, help="Skip KG sync, pin locally only.")
 @_json_flag
-def edge(source: str, target: str, edge_name: str, fact: str, output_json: bool):
+def edge(source: str, target: str, edge_name: str, fact: str, local_only: bool, output_json: bool):
     """Add an edge between two pinned nodes."""
     store = _get_storage()
     manifest = _get_active_manifest(store, json_mode=output_json)
@@ -305,15 +307,17 @@ def edge(source: str, target: str, edge_name: str, fact: str, output_json: bool)
         console.print(f"[red]{msg}[/red]")
         return
 
-    # Push edge to canonical KG by UUID
-    cfg = get_config()
-    result = kg_client.create_edge(cfg, source, target, edge_name, fact)
-    kg_synced = result is not None
-    if not output_json:
-        if result:
-            console.print("[green]Pushed[/green] edge to canonical KG")
-        else:
-            console.print("[yellow]Warning:[/yellow] Could not push edge to KG, pinning locally only.")
+    # Push edge to canonical KG by UUID (unless --local)
+    kg_synced = False
+    if not local_only:
+        cfg = get_config()
+        result = kg_client.create_edge(cfg, source, target, edge_name, fact)
+        kg_synced = result is not None
+        if not output_json:
+            if result:
+                console.print("[green]Pushed[/green] edge to canonical KG")
+            else:
+                console.print("[yellow]Warning:[/yellow] Could not push edge to KG, pinning locally only.")
 
     manifest.pin_edge(source_uuid=source, target_uuid=target, name=edge_name, fact=fact)
     store.save(manifest)
@@ -328,6 +332,188 @@ def edge(source: str, target: str, edge_name: str, fact: str, output_json: bool)
         }))
         return
     console.print(f"[green]Edge[/green] {source[:12]} —[{edge_name}]→ {target[:12]}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+def _resolve_name(
+    name: str, name_to_uuid: dict[str, str], manifest: KEngramManifest,
+) -> str | None:
+    """Resolve a node name or UUID-like string to a UUID."""
+    # 1. Check newly added nodes
+    if name in name_to_uuid:
+        return name_to_uuid[name]
+    # 2. Check existing manifest node_meta by name
+    for node_uuid, meta in manifest._node_meta.items():
+        if meta.get("name") == name:
+            return node_uuid
+    # 3. If it looks like a UUID (contains dashes), use as-is
+    if "-" in name:
+        return name
+    return None
+
+
+@kengram.command()
+@click.argument("file", required=False, default=None)
+@click.option("--to", "target_id", default=None, help="Target kEngram ID (default: active).")
+@click.option("--canvas", is_flag=True, help="Export canvas after applying batch.")
+@click.option("--sync", is_flag=True, help="Push edges to canonical KG.")
+@_json_flag
+def batch(
+    file: str | None,
+    target_id: str | None,
+    canvas: bool,
+    sync: bool,
+    output_json: bool,
+):
+    """Apply a changeset of nodes and edges from a JSON file (or stdin with -)."""
+    store = _get_storage()
+    if target_id:
+        manifest = store.load(target_id)
+        if not manifest:
+            msg = f"kEngram '{target_id}' not found."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+    else:
+        manifest = _get_active_manifest(store, json_mode=output_json)
+        if not manifest:
+            return
+
+    # Read changeset JSON
+    if file and file != "-":
+        try:
+            with open(file) as f:
+                changeset = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            msg = f"Failed to read changeset: {exc}"
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+    else:
+        raw = sys.stdin.read()
+        try:
+            changeset = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            msg = f"Invalid JSON from stdin: {exc}"
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+
+    nodes = changeset.get("nodes", [])
+    edges = changeset.get("edges", [])
+
+    manifest.begin_batch()
+
+    # --- Nodes ---
+    name_to_uuid: dict[str, str] = {}
+    generated_uuids: dict[str, str] = {}
+    nodes_added = 0
+    for node in nodes:
+        node_uuid = node.get("uuid", "auto")
+        if node_uuid == "auto":
+            node_uuid = str(_uuid_mod.uuid4())
+            generated_uuids[node["name"]] = node_uuid
+        node_name = node.get("name", "")
+        node_summary = node.get("summary", "")
+        node_labels = node.get("labels", [])
+        manifest.pin_node(uuid=node_uuid, name=node_name, summary=node_summary, labels=node_labels)
+        name_to_uuid[node_name] = node_uuid
+        nodes_added += 1
+
+    # --- Edges ---
+    edges_added = 0
+    edge_errors: list[str] = []
+    for edge_item in edges:
+        src = _resolve_name(edge_item["source"], name_to_uuid, manifest)
+        tgt = _resolve_name(edge_item["target"], name_to_uuid, manifest)
+        if not src or not tgt:
+            err = f"Cannot resolve edge: {edge_item['source']} -> {edge_item['target']}"
+            edge_errors.append(err)
+            continue
+        manifest.pin_edge(
+            source_uuid=src,
+            target_uuid=tgt,
+            name=edge_item.get("name", "RELATED_TO"),
+            fact=edge_item.get("fact", ""),
+        )
+        edges_added += 1
+
+    if edge_errors:
+        manifest.end_batch()
+        msg = "Unresolvable edges: " + "; ".join(edge_errors)
+        if output_json:
+            _json_error(msg)
+        console.print(f"[red]{msg}[/red]")
+        return
+
+    manifest.end_batch()
+    store.save(manifest)
+
+    # --- Canvas export ---
+    if canvas:
+        entities = []
+        for node_uuid in manifest.pinned_nodes:
+            meta = manifest._node_meta.get(node_uuid, {})
+            entities.append({
+                "uuid": node_uuid,
+                "name": meta.get("name", node_uuid[:12]),
+                "summary": meta.get("summary", ""),
+                "labels": meta.get("labels", []),
+            })
+        canvas_edges = []
+        for key in manifest.pinned_edges:
+            parts = key.split(":", 2)
+            if len(parts) == 3:
+                canvas_edges.append({
+                    "source_node_uuid": parts[0],
+                    "target_node_uuid": parts[1],
+                    "name": parts[2],
+                    "fact": "",
+                })
+        canvas_data = export_canvas(manifest, entities=entities, edges=canvas_edges)
+        store.save_canvas(manifest.id, canvas_data)
+
+    # --- KG sync ---
+    if sync:
+        cfg = get_config()
+        for edge_item in edges:
+            src = _resolve_name(edge_item["source"], name_to_uuid, manifest)
+            tgt = _resolve_name(edge_item["target"], name_to_uuid, manifest)
+            if src and tgt:
+                try:
+                    kg_client.create_edge(
+                        cfg, src, tgt,
+                        edge_item.get("name", "RELATED_TO"),
+                        edge_item.get("fact", ""),
+                    )
+                except Exception:
+                    pass
+
+    # --- Output ---
+    if output_json:
+        click.echo(json.dumps({
+            "status": "batch_applied",
+            "kengram_id": manifest.id,
+            "nodes_added": nodes_added,
+            "edges_added": edges_added,
+            "generated_uuids": generated_uuids,
+            "merkle_root": manifest.merkle_root,
+        }))
+        return
+
+    console.print(f"[green]Batch applied[/green] to {manifest.id}")
+    console.print(f"  Nodes added: {nodes_added}")
+    console.print(f"  Edges added: {edges_added}")
+    if generated_uuids:
+        console.print("  [bold]Generated UUIDs:[/bold]")
+        for name_val, uuid_val in generated_uuids.items():
+            console.print(f"    {name_val}: [dim]{uuid_val}[/dim]")
+    if edge_errors:
+        for err in edge_errors:
+            console.print(f"  [yellow]Warning:[/yellow] {err}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
 
 

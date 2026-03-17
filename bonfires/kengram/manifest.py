@@ -49,6 +49,7 @@ class KEngramManifest:
         self.parent_topic = parent_topic
         self.created_at = created_at
         self.updated_at = updated_at
+        self._batch_mode: bool = False
 
     @classmethod
     def create(
@@ -87,7 +88,18 @@ class KEngramManifest:
             updated_at=now,
         )
 
+    def begin_batch(self) -> None:
+        """Suppress merkle recomputation until :meth:`end_batch` is called."""
+        self._batch_mode = True
+
+    def end_batch(self) -> None:
+        """End batch mode and trigger a single merkle recompute."""
+        self._batch_mode = False
+        self._recompute_merkle()
+
     def _recompute_merkle(self) -> None:
+        if self._batch_mode:
+            return
         all_hashes = list(self._node_hashes.values()) + list(self._edge_hashes.values())
         self.merkle_root = merkle_root(all_hashes)
         self.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -671,3 +671,181 @@ def test_repin_json_api_failure(tmp_path):
     assert result.exit_code != 0
     data = json.loads(result.output)
     assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# batch command tests
+# ---------------------------------------------------------------------------
+
+
+def test_batch_basic(tmp_path):
+    """batch command adds nodes and edges from changeset JSON."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch Test"])
+    changeset = json.dumps({
+        "nodes": [
+            {"uuid": "auto", "name": "Alpha", "summary": "First node", "labels": ["Entity"]},
+            {"uuid": "auto", "name": "Beta", "summary": "Second node", "labels": ["Entity"]},
+        ],
+        "edges": [
+            {"source": "Alpha", "target": "Beta", "name": "USES", "fact": "Alpha uses Beta"},
+        ],
+    })
+    result = runner.invoke(cli, ["kengram", "batch"], input=changeset)
+    assert result.exit_code == 0
+    assert "2" in result.output  # 2 nodes
+    assert "1" in result.output  # 1 edge
+
+
+def test_batch_json_output(tmp_path):
+    """batch --json returns structured output with generated UUIDs."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch JSON"])
+    changeset = json.dumps({
+        "nodes": [
+            {"uuid": "auto", "name": "Gamma", "summary": "A node", "labels": ["Entity"]},
+        ],
+        "edges": [],
+    })
+    result = runner.invoke(cli, ["kengram", "batch", "--json"], input=changeset)
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "batch_applied"
+    assert data["nodes_added"] == 1
+    assert data["edges_added"] == 0
+    assert "Gamma" in data["generated_uuids"]
+    assert "merkle_root" in data
+
+
+def test_batch_name_resolution_existing(tmp_path):
+    """batch resolves edge targets against existing manifest nodes."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch Resolve"])
+    # Pin an existing node first
+    runner.invoke(
+        cli, ["kengram", "pin", "existing-uuid", "--name", "Existing", "--summary", "s", "--labels", "Entity"]
+    )
+    changeset = json.dumps({
+        "nodes": [
+            {"uuid": "auto", "name": "NewNode", "summary": "New", "labels": ["Entity"]},
+        ],
+        "edges": [
+            {"source": "NewNode", "target": "Existing", "name": "DEPENDS_ON", "fact": "dep"},
+        ],
+    })
+    result = runner.invoke(cli, ["kengram", "batch", "--json"], input=changeset)
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["edges_added"] == 1
+
+
+def test_batch_uuid_passthrough(tmp_path):
+    """batch passes through explicit UUIDs (non-auto)."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch UUID"])
+    changeset = json.dumps({
+        "nodes": [
+            {"uuid": "my-explicit-uuid", "name": "Explicit", "summary": "s", "labels": ["Entity"]},
+        ],
+        "edges": [],
+    })
+    result = runner.invoke(cli, ["kengram", "batch", "--json"], input=changeset)
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["nodes_added"] == 1
+    # explicit uuid should not appear in generated_uuids
+    assert "Explicit" not in data["generated_uuids"]
+
+
+def test_batch_unresolvable_edge(tmp_path):
+    """batch errors when edge references an unresolvable name."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch Err"])
+    changeset = json.dumps({
+        "nodes": [],
+        "edges": [
+            {"source": "NonExistent", "target": "AlsoNot", "name": "REL", "fact": ""},
+        ],
+    })
+    result = runner.invoke(cli, ["kengram", "batch", "--json"], input=changeset)
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+
+
+def test_batch_with_canvas(tmp_path):
+    """batch --canvas regenerates the canvas file."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch Canvas"])
+    changeset = json.dumps({
+        "nodes": [
+            {"uuid": "auto", "name": "CanvasNode", "summary": "s", "labels": ["Entity"]},
+        ],
+        "edges": [],
+    })
+    result = runner.invoke(cli, ["kengram", "batch", "--canvas"], input=changeset)
+    assert result.exit_code == 0
+    canvas_files = list((tmp_path / "kengrams" / "canvas").glob("*.canvas"))
+    assert len(canvas_files) == 1
+
+
+def test_batch_from_file(tmp_path):
+    """batch reads changeset from a file argument."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Batch File"])
+    changeset_file = tmp_path / "changeset.json"
+    changeset_file.write_text(json.dumps({
+        "nodes": [
+            {"uuid": "auto", "name": "FileNode", "summary": "from file", "labels": ["Entity"]},
+        ],
+        "edges": [],
+    }))
+    result = runner.invoke(cli, ["kengram", "batch", str(changeset_file), "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["nodes_added"] == 1
+
+
+# ---------------------------------------------------------------------------
+# edge --local tests
+# ---------------------------------------------------------------------------
+
+
+def test_edge_local_skips_kg(tmp_path):
+    """edge --local skips KG sync."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Edge Local"])
+    runner.invoke(
+        cli, ["kengram", "pin", "el-1", "--name", "A", "--summary", "s", "--labels", "x"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "el-2", "--name", "B", "--summary", "s", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        result = runner.invoke(
+            cli, ["kengram", "edge", "el-1", "el-2", "--name", "USES", "--local"]
+        )
+    assert result.exit_code == 0
+    assert "Edge" in result.output
+    mock_kg.create_edge.assert_not_called()
+
+
+def test_edge_local_json(tmp_path):
+    """edge --local --json returns structured output with kg_synced=false."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Edge Local JSON"])
+    runner.invoke(
+        cli, ["kengram", "pin", "elj-1", "--name", "A", "--summary", "s", "--labels", "x"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "elj-2", "--name", "B", "--summary", "s", "--labels", "x"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        result = runner.invoke(
+            cli, ["kengram", "edge", "elj-1", "elj-2", "--name", "USES", "--local", "--json"]
+        )
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "edge_created"
+    assert data["kg_synced"] is False
+    mock_kg.create_edge.assert_not_called()
