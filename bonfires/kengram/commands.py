@@ -991,6 +991,104 @@ def create(name: str, labels: str, summary: str, output_json: bool) -> None:
 
 
 @kengram.command()
+@click.option("--id", "target_id", default=None, help="kEngram ID (default: active).")
+@_json_flag
+def push(target_id: str | None, output_json: bool) -> None:
+    """Push local-only nodes and edges to the canonical KG."""
+    from bonfires.kengram.hashing import hash_node
+
+    cfg = get_config()
+    store = _get_storage()
+    if target_id:
+        manifest = store.load(target_id)
+        if not manifest:
+            msg = f"kEngram '{target_id}' not found."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+    else:
+        manifest = _get_active_manifest(store, json_mode=output_json)
+        if not manifest:
+            return
+
+    nodes_pushed = 0
+    nodes_skipped = 0
+    pushed_uuids: list[str] = []
+
+    for node_uuid in manifest.pinned_nodes:
+        existing = kg_client.fetch_entity(cfg, node_uuid)
+        if existing is not None:
+            nodes_skipped += 1
+            continue
+        meta = manifest._node_meta.get(node_uuid, {})
+        node_name = str(meta.get("name", ""))
+        node_summary = str(meta.get("summary", ""))
+        node_labels = list(meta.get("labels", []))
+        attributes: dict[str, Any] = {"summary": node_summary} if node_summary else {}
+        result_uuid = kg_client.create_entity(cfg, node_name, node_labels, attributes)
+        if result_uuid is not None:
+            nodes_pushed += 1
+            pushed_uuids.append(node_uuid)
+        else:
+            nodes_skipped += 1
+
+    # Re-pin pushed nodes: fetch canonical data back and update hashes
+    for node_uuid in pushed_uuids:
+        entity = kg_client.fetch_entity(cfg, node_uuid)
+        if entity:
+            new_name = str(entity.get("name", ""))
+            new_summary = str(entity.get("summary", ""))
+            new_labels = list(entity.get("labels", []))
+            new_hash = hash_node(node_uuid, new_name, new_summary, new_labels)
+            manifest._node_hashes[node_uuid] = new_hash
+            manifest._node_meta[node_uuid] = {
+                "name": new_name,
+                "summary": new_summary,
+                "labels": new_labels,
+            }
+
+    if pushed_uuids:
+        manifest._recompute_merkle()
+
+    edges_pushed = 0
+    edges_skipped = 0
+
+    for edge_key in manifest.pinned_edges:
+        parts = edge_key.split(":", 2)
+        if len(parts) != 3:
+            edges_skipped += 1
+            continue
+        source_uuid, target_uuid, edge_name = parts[0], parts[1], parts[2]
+        result = kg_client.create_edge(cfg, source_uuid, target_uuid, edge_name, "")
+        if result is not None:
+            edges_pushed += 1
+        else:
+            edges_skipped += 1
+
+    store.save(manifest)
+
+    if output_json:
+        click.echo(json.dumps({
+            "status": "pushed",
+            "kengram_id": manifest.id,
+            "nodes_pushed": nodes_pushed,
+            "nodes_skipped": nodes_skipped,
+            "edges_pushed": edges_pushed,
+            "edges_skipped": edges_skipped,
+            "merkle_root": manifest.merkle_root,
+        }))
+        return
+
+    console.print(f"[green]Pushed[/green] {manifest.id}")
+    console.print(f"  Nodes pushed:  {nodes_pushed}")
+    console.print(f"  Nodes skipped: {nodes_skipped}")
+    console.print(f"  Edges pushed:  {edges_pushed}")
+    console.print(f"  Edges skipped: {edges_skipped}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+@kengram.command()
 @click.argument("uuid")
 @_json_flag
 def repin(uuid: str, output_json: bool):

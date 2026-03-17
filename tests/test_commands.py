@@ -807,6 +807,191 @@ def test_batch_from_file(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# push command tests
+# ---------------------------------------------------------------------------
+
+
+def _create_kengram_with_node_and_edge(runner, tmp_path):
+    """Helper: create a kEngram with two nodes and one edge."""
+    runner.invoke(cli, ["kengram", "new", "Push Test"])
+    runner.invoke(
+        cli, ["kengram", "pin", "push-1", "--name", "Alpha", "--summary", "First", "--labels", "Entity"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "push-2", "--name", "Beta", "--summary", "Second", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        runner.invoke(
+            cli, ["kengram", "edge", "push-1", "push-2", "--name", "USES", "--local"]
+        )
+
+
+def test_push_nodes_not_in_kg(tmp_path):
+    """push creates nodes that don't exist in KG and skips those that do."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Nodes"])
+    runner.invoke(
+        cli, ["kengram", "pin", "p-new", "--name", "NewNode", "--summary", "A new node", "--labels", "Entity"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "p-exists", "--name", "ExistingNode", "--summary", "Already in KG", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        # p-new is not in KG, p-exists is
+        mock_kg.fetch_entity.side_effect = lambda cfg, uuid: (
+            {"uuid": uuid, "name": "ExistingNode", "summary": "Already in KG", "labels": ["Entity"]}
+            if uuid == "p-exists"
+            else None
+        )
+        mock_kg.create_entity.return_value = "p-new"
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    assert "Pushed" in result.output
+    assert "1" in result.output  # nodes_pushed
+    mock_kg.create_entity.assert_called_once()
+
+
+def test_push_all_nodes_exist(tmp_path):
+    """push skips all nodes when they already exist in KG."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push All Exist"])
+    runner.invoke(
+        cli, ["kengram", "pin", "pe-1", "--name", "Exists1", "--summary", "s", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "pe-1", "name": "Exists1", "summary": "s", "labels": ["Entity"]
+        }
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    assert "Pushed" in result.output
+    mock_kg.create_entity.assert_not_called()
+
+
+def test_push_edges(tmp_path):
+    """push sends edges to KG."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Edges"])
+    runner.invoke(
+        cli, ["kengram", "pin", "pe-src", "--name", "Src", "--summary", "s", "--labels", "Entity"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "pe-tgt", "--name", "Tgt", "--summary", "t", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        runner.invoke(
+            cli, ["kengram", "edge", "pe-src", "pe-tgt", "--name", "USES", "--local"]
+        )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = {
+            "uuid": "pe-src", "name": "Src", "summary": "s", "labels": ["Entity"]
+        }
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    mock_kg.create_edge.assert_called_once()
+
+
+def test_push_repins_pushed_nodes(tmp_path):
+    """push re-fetches canonical data and updates hashes for pushed nodes."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push Repin"])
+    runner.invoke(
+        cli, ["kengram", "pin", "rp-push", "--name", "Local", "--summary", "local-sum", "--labels", "Entity"]
+    )
+    canonical = {"uuid": "rp-push", "name": "Canonical", "summary": "canonical-sum", "labels": ["Entity", "Extra"]}
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        # First fetch: not in KG; second fetch (repin): returns canonical
+        mock_kg.fetch_entity.side_effect = [None, canonical]
+        mock_kg.create_entity.return_value = "rp-push"
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push"])
+    assert result.exit_code == 0
+    # Verify the manifest was updated with canonical data
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    assert len(manifests) == 1
+    import json as _json
+    data = _json.loads(manifests[0].read_text())
+    assert data["node_meta"]["rp-push"]["name"] == "Canonical"
+
+
+def test_push_with_id_option(tmp_path):
+    """push --id targets a specific kEngram."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push By ID"])
+    manifests = list((tmp_path / "kengrams" / "manifests").glob("ke-*.json"))
+    kengram_id = manifests[0].stem
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.fetch_entity.return_value = None
+        mock_kg.create_edge.return_value = None
+        result = runner.invoke(cli, ["kengram", "push", "--id", kengram_id])
+    assert result.exit_code == 0
+    assert "Pushed" in result.output
+
+
+def test_push_id_not_found(tmp_path):
+    """push --id with unknown ID shows error."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "push", "--id", "ke-nonexistent"])
+    assert result.exit_code == 0
+    assert "not found" in result.output
+
+
+def test_json_push(tmp_path):
+    """push --json returns structured counts."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    runner.invoke(cli, ["kengram", "new", "Push JSON"])
+    runner.invoke(
+        cli, ["kengram", "pin", "pj-1", "--name", "Node1", "--summary", "s", "--labels", "Entity"]
+    )
+    runner.invoke(
+        cli, ["kengram", "pin", "pj-2", "--name", "Node2", "--summary", "s", "--labels", "Entity"]
+    )
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        runner.invoke(
+            cli, ["kengram", "edge", "pj-1", "pj-2", "--name", "LINKS", "--local"]
+        )
+    canonical_node = {"uuid": "pj-1", "name": "Node1", "summary": "s", "labels": ["Entity"]}
+    with patch("bonfires.kengram.commands.kg_client") as mock_kg:
+        # pj-1 not in KG (push it), pj-2 already in KG (skip)
+        # After push of pj-1, fetch is called again for repin → returns canonical_node
+        mock_kg.fetch_entity.side_effect = lambda cfg, uuid: (
+            {"uuid": uuid, "name": "Node2", "summary": "s", "labels": ["Entity"]}
+            if uuid == "pj-2"
+            else (canonical_node if mock_kg.create_entity.called else None)
+        )
+        mock_kg.create_entity.return_value = "pj-1"
+        mock_kg.create_edge.return_value = {"status": "ok"}
+        result = runner.invoke(cli, ["kengram", "push", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["status"] == "pushed"
+    assert "kengram_id" in data
+    assert "nodes_pushed" in data
+    assert "nodes_skipped" in data
+    assert "edges_pushed" in data
+    assert "edges_skipped" in data
+    assert "merkle_root" in data
+    assert data["nodes_pushed"] == 1
+    assert data["nodes_skipped"] == 1
+    assert data["edges_pushed"] == 1
+
+
+def test_json_push_no_active(tmp_path):
+    """push --json returns error when no active kEngram."""
+    runner = CliRunner(env=_env_overrides(tmp_path))
+    result = runner.invoke(cli, ["kengram", "push", "--json"])
+    assert result.exit_code != 0
+    data = json.loads(result.output)
+    assert "error" in data
+
+
+# ---------------------------------------------------------------------------
 # edge --local tests
 # ---------------------------------------------------------------------------
 
