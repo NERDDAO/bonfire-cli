@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid as _uuid_mod
 from typing import Any, NoReturn
@@ -19,6 +20,7 @@ from bonfires.kengram.manifest import KEngramManifest
 from bonfires.kengram.storage import KEngramStorage
 
 console = Console()
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 _json_flag = click.option("--json", "output_json", is_flag=True, help="Output as JSON.")
 
@@ -52,6 +54,66 @@ def _get_active_manifest(
         console.print(f"[red]{msg}[/red]")
         return None
     return manifest
+
+
+def _parse_canvas_card(text: str) -> dict[str, str | list[str]] | None:
+    """Parse a canvas card's text into entity metadata. Returns None if not an entity card."""
+    lines = text.split("\n")
+    if not lines or not lines[0].startswith("### "):
+        return None
+    name = lines[0][4:].strip()
+    label_line = lines[1] if len(lines) > 1 else ""
+    labels = [m.group(1) for m in re.finditer(r"\[([^\]]+)\]", label_line)]
+    summary_start = 2 if labels else 1
+    summary = "\n".join(lines[summary_start:]).strip()
+    return {"name": name, "summary": summary, "labels": labels}
+
+
+def _check_canvas_diff(
+    manifest: KEngramManifest, vault_dir: str,
+) -> dict[str, dict[str, Any]]:
+    """Compare canvas card content against manifest node_meta.
+
+    Returns a dict of uuid -> {"status": "canvas_modified", "changes": [...]}
+    for nodes whose canvas content differs from the pinned manifest state.
+    """
+    import os
+
+    canvas_path = os.path.join(vault_dir, "kengrams", "canvas", f"{manifest.id}.canvas")
+    if not os.path.isfile(canvas_path):
+        return {}
+
+    try:
+        with open(canvas_path) as f:
+            canvas_data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    dirty: dict[str, dict[str, Any]] = {}
+    for node in canvas_data.get("nodes", []):
+        if node.get("type") != "text":
+            continue
+        node_id = node.get("id", "")
+        if node_id not in manifest._node_hashes:
+            continue
+        parsed = _parse_canvas_card(node.get("text", ""))
+        if parsed is None:
+            continue
+
+        meta = manifest._node_meta.get(node_id, {})
+        changes: list[str] = []
+        if parsed["name"] != meta.get("name", ""):
+            changes.append(f"name: '{meta.get('name', '')}' -> '{parsed['name']}'")
+        if parsed["summary"] != meta.get("summary", ""):
+            changes.append("summary changed")
+        meta_labels = sorted(meta.get("labels", []))
+        canvas_labels = sorted(parsed["labels"])
+        if meta_labels != canvas_labels:
+            changes.append(f"labels: {meta_labels} -> {canvas_labels}")
+        if changes:
+            dirty[node_id] = {"status": "canvas_modified", "changes": changes}
+
+    return dirty
 
 
 def _verify_for_export(manifest: KEngramManifest) -> dict[str, str]:
@@ -346,8 +408,8 @@ def _resolve_name(
     for node_uuid, meta in manifest._node_meta.items():
         if meta.get("name") == name:
             return node_uuid
-    # 3. If it looks like a UUID (contains dashes), use as-is
-    if "-" in name:
+    # 3. If it's a valid UUID, use as-is
+    if _UUID_RE.match(name):
         return name
     return None
 
@@ -836,22 +898,42 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
             if not output_json:
                 console.print("[dim]Edge verification: local-only (no batch edge endpoint)[/dim]")
 
+            # Canvas diff: check for unpushed local edits
+            canvas_dirty = _check_canvas_diff(manifest, cfg["vault_dir"])
+            if canvas_dirty:
+                for dirty_uuid, info in canvas_dirty.items():
+                    node_results[dirty_uuid] = info
+                    if not output_json:
+                        changes_str = ", ".join(info.get("changes", []))
+                        console.print(
+                            f"  {dirty_uuid[:12]}  [bold orange1]MODIFIED[/bold orange1]  {changes_str}"
+                        )
+
             all_hashes = list(kg_node_hashes.values()) + list(manifest._edge_hashes.values())
             recomputed = compute_merkle(all_hashes)
             verified = recomputed == manifest.merkle_root
+            has_canvas_changes = len(canvas_dirty) > 0
             if output_json:
                 click.echo(json.dumps({
-                    "status": "verified" if verified else "drift",
+                    "status": "verified" if verified and not has_canvas_changes else "drift",
                     "id": manifest.id,
                     "merkle_root": manifest.merkle_root,
                     "recomputed_root": recomputed,
                     "nodes": node_results,
+                    "canvas_modified": len(canvas_dirty),
                 }))
                 return
-            if verified:
+            if has_canvas_changes:
+                console.print(
+                    f"[bold orange1]{len(canvas_dirty)} node(s) modified on canvas — push to sync[/bold orange1]"
+                )
+            if verified and not has_canvas_changes:
                 console.print(f"[green]Verified[/green] {manifest.id}")
                 console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
                 console.print(f"  Nodes: {len(manifest.pinned_nodes)}, Edges: {len(manifest.pinned_edges)}")
+            elif has_canvas_changes and verified:
+                console.print("[yellow]KG in sync[/yellow] but canvas has unpushed changes")
+                console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
             else:
                 console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
                 console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
@@ -1105,13 +1187,20 @@ def push(target_id: str | None, changes_json: str | None, output_json: bool) -> 
                     "MODIFIED_VIA_KENGRAM",
                     f"Entity updated via kEngram canvas: name='{node_name}', labels={node_labels}",
                 )
-                # Re-pin: update manifest hash and meta
-                new_hash = hash_node(node_uuid, node_name, node_summary, node_labels)
+                # Re-pin: fetch canonical data back from KG to ensure hash matches verify
+                canonical = kg_client.fetch_entity(cfg, node_uuid)
+                if canonical:
+                    canon_name = str(canonical.get("name", node_name))
+                    canon_summary = str(canonical.get("summary", node_summary))
+                    canon_labels = list(canonical.get("labels", node_labels))
+                else:
+                    canon_name, canon_summary, canon_labels = node_name, node_summary, node_labels
+                new_hash = hash_node(node_uuid, canon_name, canon_summary, canon_labels)
                 manifest._node_hashes[node_uuid] = new_hash
                 manifest._node_meta[node_uuid] = {
-                    "name": node_name,
-                    "summary": node_summary,
-                    "labels": node_labels,
+                    "name": canon_name,
+                    "summary": canon_summary,
+                    "labels": canon_labels,
                 }
 
         # 2. Create new canvas nodes
