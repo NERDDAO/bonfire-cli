@@ -299,17 +299,37 @@ def pin(
         return
 
     manifest.pin_node(uuid=pin_uuid, name=pin_name, summary=pin_summary, labels=pin_labels)
+
+    enrichment: dict[str, Any] = {}
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_enrichment import enrich_on_pin
+        profiles = store.load_profiles_for_manifest(manifest)
+        enrichment = enrich_on_pin(manifest, pin_uuid, profiles)
+
     store.save(manifest)
     if output_json:
-        click.echo(json.dumps({
+        result: dict[str, Any] = {
             "status": "pinned",
             "uuid": pin_uuid,
             "kengram_id": manifest.id,
             "merkle_root": manifest.merkle_root,
-        }))
+        }
+        if enrichment:
+            result["ontology"] = enrichment
+        click.echo(json.dumps(result))
         return
     console.print(f"[green]Pinned[/green] {pin_uuid} to {manifest.id}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+    if enrichment:
+        rdf_types = enrichment.get("rdf_types", [])
+        auto_filled = enrichment.get("auto_filled", [])
+        warnings_list = enrichment.get("warnings", [])
+        if rdf_types:
+            console.print(f"  OWL types:   [cyan]{', '.join(rdf_types)}[/cyan]")
+        if auto_filled:
+            console.print(f"  Auto-mapped: [dim]{', '.join(auto_filled)}[/dim]")
+        for w in warnings_list:
+            console.print(f"  [yellow]Warning:[/yellow] {w}")
 
 
 @kengram.command()
@@ -382,19 +402,34 @@ def edge(source: str, target: str, edge_name: str, fact: str, local_only: bool, 
                 console.print("[yellow]Warning:[/yellow] Could not push edge to KG, pinning locally only.")
 
     manifest.pin_edge(source_uuid=source, target_uuid=target, name=edge_name, fact=fact)
+
+    edge_warnings: list[str] = []
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_enrichment import validate_edge_pin
+        from bonfires.kengram.ontology_profile import compose_profiles
+        edge_profiles = store.load_profiles_for_manifest(manifest)
+        if edge_profiles:
+            composed = compose_profiles(edge_profiles)
+            edge_warnings = validate_edge_pin(manifest, source, target, edge_name, composed)
+
     store.save(manifest)
     if output_json:
-        click.echo(json.dumps({
+        edge_result: dict[str, Any] = {
             "status": "edge_created",
             "source": source,
             "target": target,
             "name": edge_name,
             "merkle_root": manifest.merkle_root,
             "kg_synced": kg_synced,
-        }))
+        }
+        if edge_warnings:
+            edge_result["warnings"] = edge_warnings
+        click.echo(json.dumps(edge_result))
         return
     console.print(f"[green]Edge[/green] {source[:12]} —[{edge_name}]→ {target[:12]}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+    for w in edge_warnings:
+        console.print(f"  [yellow]Warning:[/yellow] {w}")
 
 
 def _resolve_name(
@@ -850,6 +885,19 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
     from bonfires.kengram.hashing import hash_node
     from bonfires.kengram.hashing import merkle_root as compute_merkle
 
+    # Profile hash drift check
+    profile_hash_status: str = "ok"
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_profile import compute_profile_hash
+        current_hash = compute_profile_hash(manifest.ontology_profiles, store.profiles_dir)
+        if current_hash != manifest.profile_hash:
+            profile_hash_status = "drift"
+            if not output_json:
+                console.print(
+                    "[yellow]Warning:[/yellow] Ontology profile hash drift detected — "
+                    "profiles have changed since last annotation. Re-run `bonfire kengram annotate` to update."
+                )
+
     if not local_only and manifest.pinned_nodes:
         fetched = kg_client.fetch_entities_batch(cfg, manifest.pinned_nodes)
         if fetched is None:
@@ -921,6 +969,7 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
                     "recomputed_root": recomputed,
                     "nodes": node_results,
                     "canvas_modified": len(canvas_dirty),
+                    "profile_hash_status": profile_hash_status,
                 }))
                 return
             if has_canvas_changes:
@@ -955,6 +1004,7 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
             "merkle_root": manifest.merkle_root,
             "recomputed_root": recomputed,
             "nodes": node_results_local,
+            "profile_hash_status": profile_hash_status,
         }))
         return
     if verified:
