@@ -54,6 +54,8 @@ class OntologyProfile:
         merged_namespaces: dict[str, str] = {KE_NAMESPACE_PREFIX: KE_NAMESPACE_URI}
         if namespaces:
             merged_namespaces.update(namespaces)
+        # Ensure the base namespace is never overridden by caller input.
+        merged_namespaces[KE_NAMESPACE_PREFIX] = KE_NAMESPACE_URI
         return cls(
             id=profile_id,
             name=name,
@@ -150,21 +152,21 @@ def invert_profile(profile: OntologyProfile) -> dict[str, Any]:
     - ``datatype_property_to_attr``: OWL datatype property IRI → attribute name
     """
     class_to_label: dict[str, str] = {}
-    for owl_class, mapping in profile.class_map.items():
-        label = mapping.get("graphiti_label")
-        if isinstance(label, str) and label:
-            class_to_label[owl_class] = label
+    for graphiti_label, mapping in profile.class_map.items():
+        owl_class = mapping.get("owl_class")
+        if isinstance(owl_class, str) and owl_class:
+            class_to_label[owl_class] = graphiti_label
 
     object_property_to_edge: dict[str, str] = {}
-    for owl_prop, mapping in profile.object_property_map.items():
-        edge_name = mapping.get("graphiti_edge")
-        if isinstance(edge_name, str) and edge_name:
+    for edge_name, mapping in profile.object_property_map.items():
+        owl_prop = mapping.get("owl_property")
+        if isinstance(owl_prop, str) and owl_prop:
             object_property_to_edge[owl_prop] = edge_name
 
     datatype_property_to_attr: dict[str, str] = {}
-    for owl_prop, mapping in profile.datatype_property_map.items():
-        attr_name = mapping.get("graphiti_attribute")
-        if isinstance(attr_name, str) and attr_name:
+    for attr_name, mapping in profile.datatype_property_map.items():
+        owl_prop = mapping.get("owl_property")
+        if isinstance(owl_prop, str) and owl_prop:
             datatype_property_to_attr[owl_prop] = attr_name
 
     return {
