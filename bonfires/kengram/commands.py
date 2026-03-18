@@ -803,10 +803,15 @@ def delete(kengram_id: str, force: bool, output_json: bool):
 
 @kengram.command()
 @click.argument("kengram_id", required=False)
-@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas", "plan"]))
+@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas", "plan", "owl"]))
+@click.option(
+    "--serialization", "serialization", default="turtle",
+    type=click.Choice(["turtle", "json-ld", "xml"]),
+    help="RDF serialization format (only for --format owl).",
+)
 @_json_flag
-def export(kengram_id: str | None, fmt: str, output_json: bool):
-    """Export a kEngram to Obsidian canvas or markdown plan format."""
+def export(kengram_id: str | None, fmt: str, serialization: str, output_json: bool):
+    """Export a kEngram to Obsidian canvas, markdown plan, or OWL/RDF format."""
     store = _get_storage()
     if kengram_id:
         manifest = store.load(kengram_id)
@@ -839,6 +844,42 @@ def export(kengram_id: str | None, fmt: str, output_json: bool):
                 "name": parts[2],
                 "fact": "",
             })
+    if fmt == "owl":
+        from bonfires.kengram.ontology_pipeline import SerializationFormat, export_rdf, parse_to_rdf
+        from bonfires.kengram.ontology_profile import compose_profiles
+
+        if not manifest.ontology_profiles:
+            msg = "No ontology profiles attached. Use `bonfire kengram profile attach` first."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[yellow]{msg}[/yellow]")
+            return
+        profiles = store.load_profiles_for_manifest(manifest)
+        if not profiles:
+            msg = "Could not load any attached profiles."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+        composed = compose_profiles(profiles)
+        graph = parse_to_rdf(manifest, composed)
+        from typing import cast
+        # Click.Choice already validates the value; narrow for the type checker.
+        ser_fmt = cast(SerializationFormat, serialization)
+        rdf_content = export_rdf(graph, ser_fmt)
+        ext_map: dict[str, str] = {"turtle": "ttl", "json-ld": "jsonld", "xml": "rdf"}
+        ext = ext_map.get(serialization, "ttl")
+        owl_path = store.save_export(manifest.id, rdf_content, ext)
+        if output_json:
+            click.echo(json.dumps({
+                "status": "exported", "id": manifest.id,
+                "format": "owl", "serialization": serialization,
+                "path": str(owl_path),
+            }))
+            return
+        console.print(f"[green]Exported[/green] {manifest.id} → {owl_path}")
+        return
+
     if fmt == "plan":
         from bonfires.kengram.plan_export import export_plan
 
@@ -1380,3 +1421,121 @@ def repin(uuid: str, output_json: bool):
     else:
         console.print(f"[green]Repinned[/green] {uuid} — no change")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+@kengram.command(name="import-owl")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--profile", "profile_id", required=True, help="Profile ID for inverted mappings.")
+@click.option("--into", "kengram_id", default=None, help="Target kEngram ID (default: active).")
+@_json_flag
+def import_owl(file: str, profile_id: str, kengram_id: str | None, output_json: bool) -> None:
+    """Import entities from an OWL/RDF file using a profile's inverted mappings."""
+    from pathlib import Path
+
+    from rdflib import RDF, RDFS, Graph, URIRef
+
+    from bonfires.kengram.ontology_profile import invert_profile
+
+    store = _get_storage()
+    if kengram_id:
+        manifest = store.load(kengram_id)
+        if not manifest:
+            msg = f"kEngram '{kengram_id}' not found."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+    else:
+        manifest = _get_active_manifest(store, json_mode=output_json)
+        if not manifest:
+            return
+
+    prof = store.load_profile(profile_id)
+    if not prof:
+        msg = f"Profile '{profile_id}' not found."
+        if output_json:
+            _json_error(msg)
+        console.print(f"[red]{msg}[/red]")
+        return
+
+    inverted = invert_profile(prof)
+    class_to_label: dict[str, str] = inverted["class_to_label"]
+    datatype_property_to_attr: dict[str, str] = inverted["datatype_property_to_attr"]
+
+    # Parse the RDF file
+    graph = Graph()
+    file_path = Path(file)
+    fmt: str | None = None
+    suffix = file_path.suffix.lower()
+    if suffix in (".ttl",):
+        fmt = "turtle"
+    elif suffix in (".jsonld", ".json"):
+        fmt = "json-ld"
+    elif suffix in (".rdf", ".xml", ".owl"):
+        fmt = "xml"
+    graph.parse(str(file_path), format=fmt)
+
+    # Extract entities matching the inverted class_map
+    nodes_added = 0
+    manifest.begin_batch()
+    try:
+        for owl_class_iri, graphiti_label in class_to_label.items():
+            owl_class_ref = URIRef(owl_class_iri)
+            for subject in graph.subjects(RDF.type, owl_class_ref):
+                if not isinstance(subject, URIRef):
+                    continue
+                # Extract a name from the URI fragment or rdfs:label
+                name_values = list(graph.objects(subject, RDFS.label))
+                if name_values:
+                    entity_name = str(name_values[0])
+                else:
+                    # Use URI fragment or last path segment
+                    fragment = str(subject).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+                    entity_name = fragment
+
+                # Extract datatype properties
+                summary = ""
+                for owl_prop_iri, attr_name in datatype_property_to_attr.items():
+                    prop_ref = URIRef(owl_prop_iri)
+                    for obj in graph.objects(subject, prop_ref):
+                        val = str(obj)
+                        if attr_name == "summary":
+                            summary = val
+                        break
+
+                # Generate a UUID for the imported entity
+                entity_uuid = str(_uuid_mod.uuid4())
+
+                manifest.pin_node(
+                    uuid=entity_uuid,
+                    name=entity_name,
+                    summary=summary,
+                    labels=[graphiti_label],
+                )
+                nodes_added += 1
+    finally:
+        manifest.end_batch()
+
+    store.save(manifest)
+
+    if output_json:
+        click.echo(json.dumps({
+            "status": "imported",
+            "kengram_id": manifest.id,
+            "nodes_added": nodes_added,
+            "source_file": file,
+            "merkle_root": manifest.merkle_root,
+        }))
+        return
+    console.print(f"[green]Imported[/green] {nodes_added} entity/entities from {file}")
+    console.print(f"  kEngram: {manifest.id}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Register profile subcommand group
+# ---------------------------------------------------------------------------
+
+from bonfires.kengram.profile_commands import profile  # noqa: E402
+
+kengram.add_command(profile)
