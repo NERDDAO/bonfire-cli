@@ -502,23 +502,49 @@ def batch(
     nodes = changeset.get("nodes", [])
     edges = changeset.get("edges", [])
 
+    # When --sync is active, push entities to KG first so we get real UUIDs.
+    # Local-only UUIDs (uuid4) are only used when --sync is NOT set.
+    cfg_for_sync = get_config() if sync else None
+
     manifest.begin_batch()
 
     # --- Nodes ---
     name_to_uuid: dict[str, str] = {}
     generated_uuids: dict[str, str] = {}
     nodes_added = 0
+    kg_push_failures: list[str] = []
     for node in nodes:
         node_uuid = node.get("uuid", "auto")
-        if node_uuid == "auto":
-            node_uuid = str(_uuid_mod.uuid4())
-            generated_uuids[node["name"]] = node_uuid
         node_name = node.get("name", "")
         node_summary = node.get("summary", "")
         node_labels = node.get("labels", [])
+
+        if node_uuid == "auto" and cfg_for_sync is not None:
+            # Push to KG first — use the KG-generated UUID
+            kg_uuid = kg_client.create_entity(
+                cfg_for_sync,
+                name=node_name,
+                labels=node_labels,
+                attributes={"summary": node_summary} if node_summary else {},
+            )
+            if kg_uuid:
+                node_uuid = kg_uuid
+                generated_uuids[node_name] = node_uuid
+            else:
+                kg_push_failures.append(node_name)
+                node_uuid = str(_uuid_mod.uuid4())
+                generated_uuids[node_name] = node_uuid
+        elif node_uuid == "auto":
+            node_uuid = str(_uuid_mod.uuid4())
+            generated_uuids[node_name] = node_uuid
+
         manifest.pin_node(uuid=node_uuid, name=node_name, summary=node_summary, labels=node_labels)
         name_to_uuid[node_name] = node_uuid
         nodes_added += 1
+
+    if kg_push_failures and not output_json:
+        for name_val in kg_push_failures:
+            console.print(f"  [yellow]Warning:[/yellow] Failed to push '{name_val}' to KG, using local UUID")
 
     # --- Edges ---
     edges_added = 0
@@ -573,16 +599,17 @@ def batch(
         canvas_data = export_canvas(manifest, entities=entities, edges=canvas_edges)
         store.save_canvas(manifest.id, canvas_data)
 
-    # --- KG sync ---
-    if sync:
-        cfg = get_config()
+    # --- KG edge sync ---
+    # Entity sync happens above (during node creation with --sync).
+    # Here we only sync edges — entities already exist in KG with real UUIDs.
+    if sync and cfg_for_sync is not None:
         for edge_item in edges:
             src = _resolve_name(edge_item["source"], name_to_uuid, manifest)
             tgt = _resolve_name(edge_item["target"], name_to_uuid, manifest)
             if src and tgt:
                 try:
                     kg_client.create_edge(
-                        cfg, src, tgt,
+                        cfg_for_sync, src, tgt,
                         edge_item.get("name", "RELATED_TO"),
                         edge_item.get("fact", ""),
                     )
@@ -1229,8 +1256,41 @@ def push(target_id: str | None, changes_json: str | None, output_json: bool) -> 
                 "labels": new_labels,
             }
 
-    if pushed_uuid_pairs:
+    # Remap edge composite keys to use canonical UUIDs.
+    uuid_remap: dict[str, str] = {local: canonical for local, canonical in pushed_uuid_pairs}
+
+    pinned_set = set(manifest.pinned_nodes)
+    stale_edges_dropped: list[str] = []
+    edges_remapped = 0
+    old_edges = list(manifest.pinned_edges)
+    for edge_key in old_edges:
+        parts = edge_key.split(":", 2)
+        if len(parts) != 3:
+            continue
+        src, tgt, ename = parts
+        new_src = uuid_remap.get(src, src)
+        new_tgt = uuid_remap.get(tgt, tgt)
+
+        # Drop edges that reference UUIDs no longer in pinned_nodes
+        # (stale from a prior push that remapped nodes but not edges)
+        if new_src not in pinned_set or new_tgt not in pinned_set:
+            manifest.unpin_edge(edge_key)
+            stale_edges_dropped.append(ename)
+            continue
+
+        if new_src != src or new_tgt != tgt:
+            manifest.unpin_edge(edge_key)
+            manifest.pin_edge(source_uuid=new_src, target_uuid=new_tgt, name=ename, fact="")
+            edges_remapped += 1
+
+    if pushed_uuid_pairs or edges_remapped or stale_edges_dropped:
         manifest._recompute_merkle()
+
+    if stale_edges_dropped and not output_json:
+        console.print(
+            f"  [yellow]Dropped {len(stale_edges_dropped)} stale edge(s) "
+            f"referencing old UUIDs:[/yellow] {', '.join(stale_edges_dropped)}"
+        )
 
     edges_pushed = 0
     edges_skipped = 0
