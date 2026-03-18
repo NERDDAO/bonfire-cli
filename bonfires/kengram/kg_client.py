@@ -37,8 +37,10 @@ def fetch_entities_batch(
             body={"entity_uuids": uuids},
         )
         if isinstance(result, dict) and "entities" in result:
-            return result["entities"]
-        return result
+            entities = result["entities"]
+            if isinstance(entities, list):
+                return entities
+        return None
     except SystemExit:
         return None
 
@@ -105,6 +107,73 @@ def update_entity(
                 "name": name,
                 "labels": labels,
                 "summary": summary,
+            },
+        )
+        return result if isinstance(result, dict) else None
+    except SystemExit:
+        return None
+
+
+def ingest_ontology(
+    cfg: dict[str, Any],
+    ontology_path: str,
+    ontology_id: str,
+) -> dict[str, Any] | None:
+    """Ingest an OWL/RDF ontology into the Owl_classes Weaviate collection."""
+    try:
+        result = api_post(
+            cfg,
+            "/knowledge_graph/ontology/ingest",
+            body={
+                "ontology_path": ontology_path,
+                "ontology_id": ontology_id,
+                "bonfire_id": cfg["bonfire_id"],
+            },
+        )
+        return result if isinstance(result, dict) else None
+    except SystemExit:
+        return None
+
+
+def match_labels(
+    cfg: dict[str, Any],
+    bonfire_id: str,
+    ontology_id: str,
+    threshold: float = 0.7,
+) -> list[dict[str, Any]] | None:
+    """Match Bonfire taxonomy labels against an ingested OWL ontology."""
+    try:
+        result = api_post(
+            cfg,
+            "/knowledge_graph/ontology/match",
+            body={
+                "bonfire_id": bonfire_id,
+                "ontology_id": ontology_id,
+                "threshold": threshold,
+            },
+        )
+        if isinstance(result, dict):
+            return result.get("matches", [])
+        return result
+    except SystemExit:
+        return None
+
+
+def generate_profile(
+    cfg: dict[str, Any],
+    bonfire_id: str,
+    ontology_id: str,
+    threshold: float = 0.7,
+) -> dict[str, Any] | None:
+    """Generate an OntologyProfile from vector-matched taxonomy labels."""
+    try:
+        result = api_post(
+            cfg,
+            "/knowledge_graph/ontology/generate-profile",
+            body={
+                "bonfire_id": bonfire_id,
+                "ontology_id": ontology_id,
+                "threshold": threshold,
             },
         )
         return result if isinstance(result, dict) else None
