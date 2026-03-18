@@ -33,6 +33,9 @@ class KEngramManifest:
         parent_topic: str | None,
         created_at: str,
         updated_at: str,
+        ontology_profiles: list[str] | None = None,
+        ontology_annotations: dict[str, dict[str, Any]] | None = None,
+        profile_hash: str = "",
     ):
         self.id = id
         self.name = name
@@ -50,6 +53,9 @@ class KEngramManifest:
         self.created_at = created_at
         self.updated_at = updated_at
         self._batch_mode: bool = False
+        self.ontology_profiles: list[str] = ontology_profiles or []
+        self.ontology_annotations: dict[str, dict[str, Any]] = ontology_annotations or {}
+        self.profile_hash: str = profile_hash
 
     @classmethod
     def create(
@@ -164,6 +170,26 @@ class KEngramManifest:
 
         self._recompute_merkle()
 
+    def annotate_entity(
+        self,
+        uuid: str,
+        profile_id: str,
+        rdf_types: list[str],
+        mapped_properties: dict[str, Any],
+        violations: list[str],
+    ) -> None:
+        """Record OWL annotation for a pinned entity."""
+        self.ontology_annotations[uuid] = {
+            "profile_id": profile_id,
+            "rdf_types": rdf_types,
+            "mapped_properties": mapped_properties,
+            "violations": violations,
+        }
+
+    def clear_annotations(self) -> None:
+        """Remove all OWL annotations from this manifest."""
+        self.ontology_annotations = {}
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -181,6 +207,9 @@ class KEngramManifest:
             "parent_topic": self.parent_topic,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "ontology_profiles": self.ontology_profiles,
+            "ontology_annotations": self.ontology_annotations,
+            "profile_hash": self.profile_hash,
         }
 
     @classmethod
@@ -201,4 +230,7 @@ class KEngramManifest:
             parent_topic=data.get("parent_topic"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
+            ontology_profiles=data.get("ontology_profiles", []),
+            ontology_annotations=data.get("ontology_annotations", {}),
+            profile_hash=data.get("profile_hash", ""),
         )
