@@ -1,0 +1,7 @@
+{
+  "venvPath": "/home/at0x/miniconda3",
+  "venv": "",
+  "extraPaths": ["/home/at0x/miniconda3/lib/python3.12/site-packages"],
+  "include": ["bonfires", "tests"],
+  "typeCheckingMode": "standard"
+}
