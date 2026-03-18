@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-import rdflib
 from rdflib import RDF, Graph, Literal as RDFLiteral, Namespace, URIRef
 
 from bonfires.kengram.manifest import KEngramManifest
@@ -435,7 +434,7 @@ def validate_graph(
                         )
 
             # --- Edge domain / range warnings (open-world) ---
-            for edge_name, prop_mapping in composed_profile.object_property_map.items():
+            for _edge_name, prop_mapping in composed_profile.object_property_map.items():
                 if not isinstance(prop_mapping, dict):
                     continue
                 domain_str: str = prop_mapping.get("domain", "")
