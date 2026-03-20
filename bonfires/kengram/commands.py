@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid as _uuid_mod
 from typing import Any, NoReturn
@@ -19,6 +20,7 @@ from bonfires.kengram.manifest import KEngramManifest
 from bonfires.kengram.storage import KEngramStorage
 
 console = Console()
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 _json_flag = click.option("--json", "output_json", is_flag=True, help="Output as JSON.")
 
@@ -52,6 +54,66 @@ def _get_active_manifest(
         console.print(f"[red]{msg}[/red]")
         return None
     return manifest
+
+
+def _parse_canvas_card(text: str) -> dict[str, str | list[str]] | None:
+    """Parse a canvas card's text into entity metadata. Returns None if not an entity card."""
+    lines = text.split("\n")
+    if not lines or not lines[0].startswith("### "):
+        return None
+    name = lines[0][4:].strip()
+    label_line = lines[1] if len(lines) > 1 else ""
+    labels = [m.group(1) for m in re.finditer(r"\[([^\]]+)\]", label_line)]
+    summary_start = 2 if labels else 1
+    summary = "\n".join(lines[summary_start:]).strip()
+    return {"name": name, "summary": summary, "labels": labels}
+
+
+def _check_canvas_diff(
+    manifest: KEngramManifest, vault_dir: str,
+) -> dict[str, dict[str, Any]]:
+    """Compare canvas card content against manifest node_meta.
+
+    Returns a dict of uuid -> {"status": "canvas_modified", "changes": [...]}
+    for nodes whose canvas content differs from the pinned manifest state.
+    """
+    import os
+
+    canvas_path = os.path.join(vault_dir, "kengrams", "canvas", f"{manifest.id}.canvas")
+    if not os.path.isfile(canvas_path):
+        return {}
+
+    try:
+        with open(canvas_path) as f:
+            canvas_data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    dirty: dict[str, dict[str, Any]] = {}
+    for node in canvas_data.get("nodes", []):
+        if node.get("type") != "text":
+            continue
+        node_id = node.get("id", "")
+        if node_id not in manifest._node_hashes:
+            continue
+        parsed = _parse_canvas_card(node.get("text", ""))
+        if parsed is None:
+            continue
+
+        meta = manifest._node_meta.get(node_id, {})
+        changes: list[str] = []
+        if parsed["name"] != meta.get("name", ""):
+            changes.append(f"name: '{meta.get('name', '')}' -> '{parsed['name']}'")
+        if parsed["summary"] != meta.get("summary", ""):
+            changes.append("summary changed")
+        meta_labels = sorted(meta.get("labels", []))
+        canvas_labels = sorted(parsed["labels"])
+        if meta_labels != canvas_labels:
+            changes.append(f"labels: {meta_labels} -> {canvas_labels}")
+        if changes:
+            dirty[node_id] = {"status": "canvas_modified", "changes": changes}
+
+    return dirty
 
 
 def _verify_for_export(manifest: KEngramManifest) -> dict[str, str]:
@@ -237,17 +299,37 @@ def pin(
         return
 
     manifest.pin_node(uuid=pin_uuid, name=pin_name, summary=pin_summary, labels=pin_labels)
+
+    enrichment: dict[str, Any] = {}
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_enrichment import enrich_on_pin
+        profiles = store.load_profiles_for_manifest(manifest)
+        enrichment = enrich_on_pin(manifest, pin_uuid, profiles)
+
     store.save(manifest)
     if output_json:
-        click.echo(json.dumps({
+        result: dict[str, Any] = {
             "status": "pinned",
             "uuid": pin_uuid,
             "kengram_id": manifest.id,
             "merkle_root": manifest.merkle_root,
-        }))
+        }
+        if enrichment:
+            result["ontology"] = enrichment
+        click.echo(json.dumps(result))
         return
     console.print(f"[green]Pinned[/green] {pin_uuid} to {manifest.id}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+    if enrichment:
+        rdf_types = enrichment.get("rdf_types", [])
+        auto_filled = enrichment.get("auto_filled", [])
+        warnings_list = enrichment.get("warnings", [])
+        if rdf_types:
+            console.print(f"  OWL types:   [cyan]{', '.join(rdf_types)}[/cyan]")
+        if auto_filled:
+            console.print(f"  Auto-mapped: [dim]{', '.join(auto_filled)}[/dim]")
+        for w in warnings_list:
+            console.print(f"  [yellow]Warning:[/yellow] {w}")
 
 
 @kengram.command()
@@ -320,19 +402,34 @@ def edge(source: str, target: str, edge_name: str, fact: str, local_only: bool, 
                 console.print("[yellow]Warning:[/yellow] Could not push edge to KG, pinning locally only.")
 
     manifest.pin_edge(source_uuid=source, target_uuid=target, name=edge_name, fact=fact)
+
+    edge_warnings: list[str] = []
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_enrichment import validate_edge_pin
+        from bonfires.kengram.ontology_profile import compose_profiles
+        edge_profiles = store.load_profiles_for_manifest(manifest)
+        if edge_profiles:
+            composed = compose_profiles(edge_profiles)
+            edge_warnings = validate_edge_pin(manifest, source, target, edge_name, composed)
+
     store.save(manifest)
     if output_json:
-        click.echo(json.dumps({
+        edge_result: dict[str, Any] = {
             "status": "edge_created",
             "source": source,
             "target": target,
             "name": edge_name,
             "merkle_root": manifest.merkle_root,
             "kg_synced": kg_synced,
-        }))
+        }
+        if edge_warnings:
+            edge_result["warnings"] = edge_warnings
+        click.echo(json.dumps(edge_result))
         return
     console.print(f"[green]Edge[/green] {source[:12]} —[{edge_name}]→ {target[:12]}")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+    for w in edge_warnings:
+        console.print(f"  [yellow]Warning:[/yellow] {w}")
 
 
 def _resolve_name(
@@ -346,8 +443,8 @@ def _resolve_name(
     for node_uuid, meta in manifest._node_meta.items():
         if meta.get("name") == name:
             return node_uuid
-    # 3. If it looks like a UUID (contains dashes), use as-is
-    if "-" in name:
+    # 3. If it's a valid UUID, use as-is
+    if _UUID_RE.match(name):
         return name
     return None
 
@@ -405,23 +502,49 @@ def batch(
     nodes = changeset.get("nodes", [])
     edges = changeset.get("edges", [])
 
+    # When --sync is active, push entities to KG first so we get real UUIDs.
+    # Local-only UUIDs (uuid4) are only used when --sync is NOT set.
+    cfg_for_sync = get_config() if sync else None
+
     manifest.begin_batch()
 
     # --- Nodes ---
     name_to_uuid: dict[str, str] = {}
     generated_uuids: dict[str, str] = {}
     nodes_added = 0
+    kg_push_failures: list[str] = []
     for node in nodes:
         node_uuid = node.get("uuid", "auto")
-        if node_uuid == "auto":
-            node_uuid = str(_uuid_mod.uuid4())
-            generated_uuids[node["name"]] = node_uuid
         node_name = node.get("name", "")
         node_summary = node.get("summary", "")
         node_labels = node.get("labels", [])
+
+        if node_uuid == "auto" and cfg_for_sync is not None:
+            # Push to KG first — use the KG-generated UUID
+            kg_uuid = kg_client.create_entity(
+                cfg_for_sync,
+                name=node_name,
+                labels=node_labels,
+                attributes={"summary": node_summary} if node_summary else {},
+            )
+            if kg_uuid:
+                node_uuid = kg_uuid
+                generated_uuids[node_name] = node_uuid
+            else:
+                kg_push_failures.append(node_name)
+                node_uuid = str(_uuid_mod.uuid4())
+                generated_uuids[node_name] = node_uuid
+        elif node_uuid == "auto":
+            node_uuid = str(_uuid_mod.uuid4())
+            generated_uuids[node_name] = node_uuid
+
         manifest.pin_node(uuid=node_uuid, name=node_name, summary=node_summary, labels=node_labels)
         name_to_uuid[node_name] = node_uuid
         nodes_added += 1
+
+    if kg_push_failures and not output_json:
+        for name_val in kg_push_failures:
+            console.print(f"  [yellow]Warning:[/yellow] Failed to push '{name_val}' to KG, using local UUID")
 
     # --- Edges ---
     edges_added = 0
@@ -476,16 +599,17 @@ def batch(
         canvas_data = export_canvas(manifest, entities=entities, edges=canvas_edges)
         store.save_canvas(manifest.id, canvas_data)
 
-    # --- KG sync ---
-    if sync:
-        cfg = get_config()
+    # --- KG edge sync ---
+    # Entity sync happens above (during node creation with --sync).
+    # Here we only sync edges — entities already exist in KG with real UUIDs.
+    if sync and cfg_for_sync is not None:
         for edge_item in edges:
             src = _resolve_name(edge_item["source"], name_to_uuid, manifest)
             tgt = _resolve_name(edge_item["target"], name_to_uuid, manifest)
             if src and tgt:
                 try:
                     kg_client.create_edge(
-                        cfg, src, tgt,
+                        cfg_for_sync, src, tgt,
                         edge_item.get("name", "RELATED_TO"),
                         edge_item.get("fact", ""),
                     )
@@ -706,10 +830,15 @@ def delete(kengram_id: str, force: bool, output_json: bool):
 
 @kengram.command()
 @click.argument("kengram_id", required=False)
-@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas", "plan"]))
+@click.option("--format", "fmt", default="canvas", type=click.Choice(["canvas", "plan", "owl"]))
+@click.option(
+    "--serialization", "serialization", default="turtle",
+    type=click.Choice(["turtle", "json-ld", "xml"]),
+    help="RDF serialization format (only for --format owl).",
+)
 @_json_flag
-def export(kengram_id: str | None, fmt: str, output_json: bool):
-    """Export a kEngram to Obsidian canvas or markdown plan format."""
+def export(kengram_id: str | None, fmt: str, serialization: str, output_json: bool):
+    """Export a kEngram to Obsidian canvas, markdown plan, or OWL/RDF format."""
     store = _get_storage()
     if kengram_id:
         manifest = store.load(kengram_id)
@@ -742,6 +871,42 @@ def export(kengram_id: str | None, fmt: str, output_json: bool):
                 "name": parts[2],
                 "fact": "",
             })
+    if fmt == "owl":
+        from bonfires.kengram.ontology_pipeline import SerializationFormat, export_rdf, parse_to_rdf
+        from bonfires.kengram.ontology_profile import compose_profiles
+
+        if not manifest.ontology_profiles:
+            msg = "No ontology profiles attached. Use `bonfire kengram profile attach` first."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[yellow]{msg}[/yellow]")
+            return
+        profiles = store.load_profiles_for_manifest(manifest)
+        if not profiles:
+            msg = "Could not load any attached profiles."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+        composed = compose_profiles(profiles)
+        graph = parse_to_rdf(manifest, composed)
+        from typing import cast
+        # Click.Choice already validates the value; narrow for the type checker.
+        ser_fmt = cast(SerializationFormat, serialization)
+        rdf_content = export_rdf(graph, ser_fmt)
+        ext_map: dict[str, str] = {"turtle": "ttl", "json-ld": "jsonld", "xml": "rdf"}
+        ext = ext_map.get(serialization, "ttl")
+        owl_path = store.save_export(manifest.id, rdf_content, ext)
+        if output_json:
+            click.echo(json.dumps({
+                "status": "exported", "id": manifest.id,
+                "format": "owl", "serialization": serialization,
+                "path": str(owl_path),
+            }))
+            return
+        console.print(f"[green]Exported[/green] {manifest.id} → {owl_path}")
+        return
+
     if fmt == "plan":
         from bonfires.kengram.plan_export import export_plan
 
@@ -787,6 +952,19 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
 
     from bonfires.kengram.hashing import hash_node
     from bonfires.kengram.hashing import merkle_root as compute_merkle
+
+    # Profile hash drift check
+    profile_hash_status: str = "ok"
+    if manifest.ontology_profiles:
+        from bonfires.kengram.ontology_profile import compute_profile_hash
+        current_hash = compute_profile_hash(manifest.ontology_profiles, store.profiles_dir)
+        if current_hash != manifest.profile_hash:
+            profile_hash_status = "drift"
+            if not output_json:
+                console.print(
+                    "[yellow]Warning:[/yellow] Ontology profile hash drift detected — "
+                    "profiles have changed since last annotation. Re-run `bonfire kengram annotate` to update."
+                )
 
     if not local_only and manifest.pinned_nodes:
         fetched = kg_client.fetch_entities_batch(cfg, manifest.pinned_nodes)
@@ -836,22 +1014,43 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
             if not output_json:
                 console.print("[dim]Edge verification: local-only (no batch edge endpoint)[/dim]")
 
+            # Canvas diff: check for unpushed local edits
+            canvas_dirty = _check_canvas_diff(manifest, cfg["vault_dir"])
+            if canvas_dirty:
+                for dirty_uuid, info in canvas_dirty.items():
+                    node_results[dirty_uuid] = info
+                    if not output_json:
+                        changes_str = ", ".join(info.get("changes", []))
+                        console.print(
+                            f"  {dirty_uuid[:12]}  [bold orange1]MODIFIED[/bold orange1]  {changes_str}"
+                        )
+
             all_hashes = list(kg_node_hashes.values()) + list(manifest._edge_hashes.values())
             recomputed = compute_merkle(all_hashes)
             verified = recomputed == manifest.merkle_root
+            has_canvas_changes = len(canvas_dirty) > 0
             if output_json:
                 click.echo(json.dumps({
-                    "status": "verified" if verified else "drift",
+                    "status": "verified" if verified and not has_canvas_changes else "drift",
                     "id": manifest.id,
                     "merkle_root": manifest.merkle_root,
                     "recomputed_root": recomputed,
                     "nodes": node_results,
+                    "canvas_modified": len(canvas_dirty),
+                    "profile_hash_status": profile_hash_status,
                 }))
                 return
-            if verified:
+            if has_canvas_changes:
+                console.print(
+                    f"[bold orange1]{len(canvas_dirty)} node(s) modified on canvas — push to sync[/bold orange1]"
+                )
+            if verified and not has_canvas_changes:
                 console.print(f"[green]Verified[/green] {manifest.id}")
                 console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
                 console.print(f"  Nodes: {len(manifest.pinned_nodes)}, Edges: {len(manifest.pinned_edges)}")
+            elif has_canvas_changes and verified:
+                console.print("[yellow]KG in sync[/yellow] but canvas has unpushed changes")
+                console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
             else:
                 console.print(f"[red]DRIFT DETECTED[/red] in {manifest.id}")
                 console.print(f"  Stored root:     [dim]{manifest.merkle_root[:16]}...[/dim]")
@@ -873,6 +1072,7 @@ def verify(kengram_id: str | None, local_only: bool, output_json: bool):
             "merkle_root": manifest.merkle_root,
             "recomputed_root": recomputed,
             "nodes": node_results_local,
+            "profile_hash_status": profile_hash_status,
         }))
         return
     if verified:
@@ -1056,8 +1256,41 @@ def push(target_id: str | None, changes_json: str | None, output_json: bool) -> 
                 "labels": new_labels,
             }
 
-    if pushed_uuid_pairs:
+    # Remap edge composite keys to use canonical UUIDs.
+    uuid_remap: dict[str, str] = {local: canonical for local, canonical in pushed_uuid_pairs}
+
+    pinned_set = set(manifest.pinned_nodes)
+    stale_edges_dropped: list[str] = []
+    edges_remapped = 0
+    old_edges = list(manifest.pinned_edges)
+    for edge_key in old_edges:
+        parts = edge_key.split(":", 2)
+        if len(parts) != 3:
+            continue
+        src, tgt, ename = parts
+        new_src = uuid_remap.get(src, src)
+        new_tgt = uuid_remap.get(tgt, tgt)
+
+        # Drop edges that reference UUIDs no longer in pinned_nodes
+        # (stale from a prior push that remapped nodes but not edges)
+        if new_src not in pinned_set or new_tgt not in pinned_set:
+            manifest.unpin_edge(edge_key)
+            stale_edges_dropped.append(ename)
+            continue
+
+        if new_src != src or new_tgt != tgt:
+            manifest.unpin_edge(edge_key)
+            manifest.pin_edge(source_uuid=new_src, target_uuid=new_tgt, name=ename, fact="")
+            edges_remapped += 1
+
+    if pushed_uuid_pairs or edges_remapped or stale_edges_dropped:
         manifest._recompute_merkle()
+
+    if stale_edges_dropped and not output_json:
+        console.print(
+            f"  [yellow]Dropped {len(stale_edges_dropped)} stale edge(s) "
+            f"referencing old UUIDs:[/yellow] {', '.join(stale_edges_dropped)}"
+        )
 
     edges_pushed = 0
     edges_skipped = 0
@@ -1105,13 +1338,20 @@ def push(target_id: str | None, changes_json: str | None, output_json: bool) -> 
                     "MODIFIED_VIA_KENGRAM",
                     f"Entity updated via kEngram canvas: name='{node_name}', labels={node_labels}",
                 )
-                # Re-pin: update manifest hash and meta
-                new_hash = hash_node(node_uuid, node_name, node_summary, node_labels)
+                # Re-pin: fetch canonical data back from KG to ensure hash matches verify
+                canonical = kg_client.fetch_entity(cfg, node_uuid)
+                if canonical:
+                    canon_name = str(canonical.get("name", node_name))
+                    canon_summary = str(canonical.get("summary", node_summary))
+                    canon_labels = list(canonical.get("labels", node_labels))
+                else:
+                    canon_name, canon_summary, canon_labels = node_name, node_summary, node_labels
+                new_hash = hash_node(node_uuid, canon_name, canon_summary, canon_labels)
                 manifest._node_hashes[node_uuid] = new_hash
                 manifest._node_meta[node_uuid] = {
-                    "name": node_name,
-                    "summary": node_summary,
-                    "labels": node_labels,
+                    "name": canon_name,
+                    "summary": canon_summary,
+                    "labels": canon_labels,
                 }
 
         # 2. Create new canvas nodes
@@ -1241,3 +1481,121 @@ def repin(uuid: str, output_json: bool):
     else:
         console.print(f"[green]Repinned[/green] {uuid} — no change")
     console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+@kengram.command(name="import-owl")
+@click.argument("file", type=click.Path(exists=True))
+@click.option("--profile", "profile_id", required=True, help="Profile ID for inverted mappings.")
+@click.option("--into", "kengram_id", default=None, help="Target kEngram ID (default: active).")
+@_json_flag
+def import_owl(file: str, profile_id: str, kengram_id: str | None, output_json: bool) -> None:
+    """Import entities from an OWL/RDF file using a profile's inverted mappings."""
+    from pathlib import Path
+
+    from rdflib import RDF, RDFS, Graph, URIRef
+
+    from bonfires.kengram.ontology_profile import invert_profile
+
+    store = _get_storage()
+    if kengram_id:
+        manifest = store.load(kengram_id)
+        if not manifest:
+            msg = f"kEngram '{kengram_id}' not found."
+            if output_json:
+                _json_error(msg)
+            console.print(f"[red]{msg}[/red]")
+            return
+    else:
+        manifest = _get_active_manifest(store, json_mode=output_json)
+        if not manifest:
+            return
+
+    prof = store.load_profile(profile_id)
+    if not prof:
+        msg = f"Profile '{profile_id}' not found."
+        if output_json:
+            _json_error(msg)
+        console.print(f"[red]{msg}[/red]")
+        return
+
+    inverted = invert_profile(prof)
+    class_to_label: dict[str, str] = inverted["class_to_label"]
+    datatype_property_to_attr: dict[str, str] = inverted["datatype_property_to_attr"]
+
+    # Parse the RDF file
+    graph = Graph()
+    file_path = Path(file)
+    fmt: str | None = None
+    suffix = file_path.suffix.lower()
+    if suffix in (".ttl",):
+        fmt = "turtle"
+    elif suffix in (".jsonld", ".json"):
+        fmt = "json-ld"
+    elif suffix in (".rdf", ".xml", ".owl"):
+        fmt = "xml"
+    graph.parse(str(file_path), format=fmt)
+
+    # Extract entities matching the inverted class_map
+    nodes_added = 0
+    manifest.begin_batch()
+    try:
+        for owl_class_iri, graphiti_label in class_to_label.items():
+            owl_class_ref = URIRef(owl_class_iri)
+            for subject in graph.subjects(RDF.type, owl_class_ref):
+                if not isinstance(subject, URIRef):
+                    continue
+                # Extract a name from the URI fragment or rdfs:label
+                name_values = list(graph.objects(subject, RDFS.label))
+                if name_values:
+                    entity_name = str(name_values[0])
+                else:
+                    # Use URI fragment or last path segment
+                    fragment = str(subject).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+                    entity_name = fragment
+
+                # Extract datatype properties
+                summary = ""
+                for owl_prop_iri, attr_name in datatype_property_to_attr.items():
+                    prop_ref = URIRef(owl_prop_iri)
+                    for obj in graph.objects(subject, prop_ref):
+                        val = str(obj)
+                        if attr_name == "summary":
+                            summary = val
+                        break
+
+                # Generate a UUID for the imported entity
+                entity_uuid = str(_uuid_mod.uuid4())
+
+                manifest.pin_node(
+                    uuid=entity_uuid,
+                    name=entity_name,
+                    summary=summary,
+                    labels=[graphiti_label],
+                )
+                nodes_added += 1
+    finally:
+        manifest.end_batch()
+
+    store.save(manifest)
+
+    if output_json:
+        click.echo(json.dumps({
+            "status": "imported",
+            "kengram_id": manifest.id,
+            "nodes_added": nodes_added,
+            "source_file": file,
+            "merkle_root": manifest.merkle_root,
+        }))
+        return
+    console.print(f"[green]Imported[/green] {nodes_added} entity/entities from {file}")
+    console.print(f"  kEngram: {manifest.id}")
+    console.print(f"  Merkle root: [dim]{manifest.merkle_root[:16]}...[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# Register profile subcommand group
+# ---------------------------------------------------------------------------
+
+from bonfires.kengram.profile_commands import profile  # noqa: E402
+
+kengram.add_command(profile)

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from bonfires.kengram.manifest import KEngramManifest
+from bonfires.kengram.ontology_profile import OntologyProfile
 
 
 class KEngramStorage:
@@ -20,6 +21,8 @@ class KEngramStorage:
         self.manifests_dir = self.vault_dir / "kengrams" / "manifests"
         self.canvas_dir = self.vault_dir / "kengrams" / "canvas"
         self._active_file = self.vault_dir / "kengrams" / ".active"
+        self.profiles_dir = self.vault_dir / "kengrams" / "profiles"
+        self.exports_dir = self.vault_dir / "kengrams" / "exports"
 
     def save(self, manifest: KEngramManifest) -> Path:
         self.manifests_dir.mkdir(parents=True, exist_ok=True)
@@ -82,4 +85,62 @@ class KEngramStorage:
         plan_dir.mkdir(parents=True, exist_ok=True)
         path = plan_dir / filename
         path.write_text(markdown)
+        return path
+
+    # ------------------------------------------------------------------
+    # Ontology profile storage
+    # ------------------------------------------------------------------
+
+    def save_profile(self, profile: OntologyProfile) -> Path:
+        """Persist an ontology profile as JSON and return its path."""
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        path = self.profiles_dir / f"{profile.id}.json"
+        path.write_text(json.dumps(profile.to_dict(), indent=2))
+        return path
+
+    def load_profile(self, profile_id: str) -> OntologyProfile | None:
+        """Load an ontology profile by ID. Returns None if not found."""
+        path = self.profiles_dir / f"{profile_id}.json"
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text())
+        return OntologyProfile.from_dict(data)
+
+    def list_profiles(self) -> list[dict[str, Any]]:
+        """Return summary dicts for all stored ontology profiles."""
+        if not self.profiles_dir.exists():
+            return []
+        items: list[dict[str, Any]] = []
+        for path in sorted(self.profiles_dir.glob("profile-*.json")):
+            data = json.loads(path.read_text())
+            items.append({
+                "id": data["id"],
+                "name": data["name"],
+                "version": data.get("version", ""),
+                "namespaces": list(data.get("namespaces", {}).keys()),
+            })
+        return items
+
+    def load_profiles_for_manifest(self, manifest: KEngramManifest) -> list[OntologyProfile]:
+        """Load all profiles referenced by a manifest, in declaration order."""
+        profiles: list[OntologyProfile] = []
+        for profile_id in manifest.ontology_profiles:
+            profile = self.load_profile(profile_id)
+            if profile is not None:
+                profiles.append(profile)
+        return profiles
+
+    # ------------------------------------------------------------------
+    # Export storage
+    # ------------------------------------------------------------------
+
+    def save_export(self, kengram_id: str, content: str, extension: str) -> Path:
+        """Write an export file and return its path.
+
+        ``extension`` should be a bare extension such as ``ttl`` or ``json-ld``.
+        The file is named ``{kengram_id}.{extension}`` inside the exports dir.
+        """
+        self.exports_dir.mkdir(parents=True, exist_ok=True)
+        path = self.exports_dir / f"{kengram_id}.{extension}"
+        path.write_text(content)
         return path
