@@ -1,0 +1,114 @@
+"""BonfiresClient — main entry point for the Bonfires SDK."""
+
+from __future__ import annotations
+
+from bonfires.sdk.agents import AgentService
+from bonfires.sdk.config import BonfiresConfig
+from bonfires.sdk.exceptions import ConfigError
+from bonfires.sdk.kg import KGService
+from bonfires.sdk.kengram import KEngramService
+from bonfires.sdk.ontology import OntologyService
+
+
+class BonfiresClient:
+    """Programmatic access to the Bonfires AI API.
+
+    Usage::
+
+        # Option A: explicit params (falls back to env vars for missing ones)
+        client = BonfiresClient(api_key="...", bonfire_id="...", agent_id="...")
+
+        # Option B: pre-built config
+        config = BonfiresConfig.from_env()
+        client = BonfiresClient(config=config)
+
+        # Option C: all from env vars / dotenv
+        client = BonfiresClient()
+
+    Services are accessed as attributes::
+
+        client.kg.search("query")
+        client.agents.chat("hello")
+        client.kengrams.create("my-kengram")
+        client.ontology.list_profiles()
+    """
+
+    kg: KGService
+    agents: AgentService
+    kengrams: KEngramService
+    ontology: OntologyService
+
+    def __init__(
+        self,
+        *,
+        config: BonfiresConfig | None = None,
+        api_key: str | None = None,
+        bonfire_id: str | None = None,
+        agent_id: str | None = None,
+        api_url: str | None = None,
+        vault_dir: str | None = None,
+    ) -> None:
+        if config is not None:
+            self._config = config
+        else:
+            # Build from explicit params + env fallback
+            self._config = self._build_config(
+                api_key=api_key,
+                bonfire_id=bonfire_id,
+                agent_id=agent_id,
+                api_url=api_url,
+                vault_dir=vault_dir,
+            )
+
+        self.kg = KGService(self._config)
+        self.agents = AgentService(self._config)
+        self.kengrams = KEngramService(self._config, self.kg)
+        self.ontology = OntologyService(self._config, self.kg)
+
+    @property
+    def config(self) -> BonfiresConfig:
+        """The resolved configuration."""
+        return self._config
+
+    @staticmethod
+    def _build_config(
+        *,
+        api_key: str | None,
+        bonfire_id: str | None,
+        agent_id: str | None,
+        api_url: str | None,
+        vault_dir: str | None,
+    ) -> BonfiresConfig:
+        """Build config by merging explicit params over env-loaded values."""
+        try:
+            env_config = BonfiresConfig.from_env()
+        except ConfigError:
+            env_config = None
+
+        # If no explicit params provided and env loading failed, re-raise
+        has_explicit = any(v is not None for v in (api_key, bonfire_id, agent_id))
+        if not has_explicit and env_config is None:
+            # Re-run to get the original error message
+            BonfiresConfig.from_env()
+
+        if env_config is not None:
+            return BonfiresConfig(
+                api_key=api_key or env_config.api_key,
+                bonfire_id=bonfire_id or env_config.bonfire_id,
+                agent_id=agent_id or env_config.agent_id,
+                api_url=api_url or env_config.api_url,
+                vault_dir=vault_dir or env_config.vault_dir,
+            )
+
+        # No env config — all params must be explicit
+        if not api_key or not bonfire_id or not agent_id:
+            raise ConfigError(
+                "api_key, bonfire_id, and agent_id are required when env config is unavailable"
+            )
+        return BonfiresConfig(
+            api_key=api_key,
+            bonfire_id=bonfire_id,
+            agent_id=agent_id,
+            api_url=api_url or "https://tnt-v2.api.bonfires.ai",
+            vault_dir=vault_dir or "",
+        )
