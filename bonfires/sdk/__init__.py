@@ -1,8 +1,7 @@
-"""Bonfires — SDK and CLI for the Bonfires AI API."""
+"""Bonfires SDK — programmatic access to the Bonfires AI API."""
 
-__version__ = "0.4.0"
-
-from bonfires.sdk import BonfiresClient, BonfiresConfig
+from bonfires.sdk.client import BonfiresClient
+from bonfires.sdk.config import BonfiresConfig
 from bonfires.sdk.exceptions import (
     APIError,
     AuthenticationError,
@@ -13,7 +12,6 @@ from bonfires.sdk.exceptions import (
 )
 
 __all__ = [
-    "__version__",
     "BonfiresClient",
     "BonfiresConfig",
     "BonfiresError",
