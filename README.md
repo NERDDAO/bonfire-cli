@@ -1,6 +1,6 @@
-# Bonfires CLI
+# Bonfires
 
-Terminal interface for the [Bonfires AI](https://bonfires.ai) API. Chat with agents, search the knowledge graph, sync context, and render graph data — all from the command line.
+SDK and CLI for the [Bonfires AI](https://bonfires.ai) API. Chat with agents, search the knowledge graph, manage kEngrams, and sync context — from Python code or the command line.
 
 ## Install
 
@@ -14,133 +14,167 @@ Or install from source:
 pip install git+https://github.com/NERDDAO/bonfire-cli.git
 ```
 
-For global install without polluting your Python environment:
+## SDK
 
-```bash
-pipx install bonfires
+Use the Bonfires API programmatically from any Python code — AI agents, scripts, backend services.
+
+```python
+from bonfires import BonfiresClient
+
+client = BonfiresClient(
+    api_key="...",
+    bonfire_id="...",
+    agent_id="...",
+    vault_dir="/path/to/vault",
+)
+# Or load everything from env vars / dotenv:
+client = BonfiresClient()
 ```
 
-## Getting Started
+### Knowledge Graph
 
-Run the interactive setup:
-
-```bash
-bonfire init
+```python
+results = client.kg.search("authentication patterns", num_results=10)
+entity = client.kg.get_entity("uuid-here")
+uuid = client.kg.create_entity("Auth Service", labels=["Service"], attributes={"summary": "Handles auth"})
+client.kg.create_edge(source_uuid, target_uuid, name="DEPENDS_ON", fact="Auth required")
 ```
 
-This will:
-1. Connect to the Bonfires API
-2. List your bonfires and let you pick one
-3. List available agents and let you pick one
-4. Save credentials to `~/.config/bonfires/config.env`
+### Agents
 
-You're ready to go:
-
-```bash
-bonfire chat "hello"
+```python
+response = client.agents.chat("What do we know about auth?", graph_mode="regenerate")
+client.agents.sync("Shipped v2 of the auth service", chat_id="myrepo:main")
+agents = client.agents.list()
 ```
 
-## Commands
+### kEngrams
 
-### `bonfire init`
-
-Interactive setup wizard. Connects to the API, lists your bonfires and agents, and saves config.
-
-```bash
-bonfire init
+```python
+manifest = client.kengrams.create("Sprint Review", type="session")
+result = client.kengrams.pin(manifest.id, "entity-uuid")
+client.kengrams.add_edge(manifest.id, src, tgt, "RELATES_TO", sync_to_kg=True)
+client.kengrams.batch(manifest.id, {"nodes": [...], "edges": [...]}, sync_to_kg=True)
+verification = client.kengrams.verify(manifest.id)
+path = client.kengrams.export(manifest.id, format="canvas")
+client.kengrams.push(manifest.id)  # push local-only entities to canonical KG
 ```
 
-Or skip the prompts:
+### Ontology Profiles
 
-```bash
-bonfire init --api-key YOUR_KEY --bonfire-id ID --agent-id ID
+```python
+prof = client.ontology.create_profile("My Ontology", namespaces={"foaf": "http://xmlns.com/foaf/0.1/"})
+client.ontology.attach_profile(kengram_id, prof.id)
+gaps = client.ontology.extract_gaps(kengram_id)
 ```
 
-### `bonfire chat`
+### Error Handling
 
-Send a message to a Bonfire agent. Searches the knowledge graph by default.
+```python
+from bonfires import BonfiresClient, APIError, NotFoundError, ConfigError
+
+try:
+    client = BonfiresClient()
+    entity = client.kg.get_entity("missing-uuid")
+except ConfigError as e:
+    print(f"Config problem: {e}")
+except NotFoundError as e:
+    print(f"Not found: {e}")
+except APIError as e:
+    print(f"API error {e.status_code}: {e.response_text}")
+```
+
+## CLI
+
+### Getting Started
+
+```bash
+bonfire init          # interactive setup wizard
+bonfire chat "hello"  # send a message to your agent
+```
+
+`bonfire init` connects to the API, lists your bonfires and agents, and saves credentials to `~/.config/bonfires/config.env`.
+
+### Commands
+
+**Chat & Search**
 
 ```bash
 bonfire chat "What do we know about auth patterns?"
-```
-
-Control graph behavior with `--graph-mode`:
-
-```bash
-bonfire chat "find related context"                        # default: regenerate
 bonfire chat --graph-mode adaptive "let the agent decide"
-bonfire chat --graph-mode append "add to existing graph"
-bonfire chat --graph-mode static "just reply, no graph"
-```
-
-### `bonfire delve`
-
-Search the knowledge graph directly.
-
-```bash
 bonfire delve "error handling patterns"
 bonfire delve -n 20 "authentication architecture"
 ```
 
-### `bonfire sync`
-
-Push context to the knowledge graph. Derives a chat ID from your current git repo and branch.
+**Sync Context**
 
 ```bash
-bonfire sync "shipped bonfire-cli v0.1"
+bonfire sync "shipped bonfire-cli v0.4"
 bonfire sync "design spec for auth" -f docs/auth-design.md
 ```
 
-### `bonfire agents`
+**List Resources**
 
-List agents for the configured bonfire.
+```bash
+bonfire agents     # list agents
+bonfire bonfires   # list bonfires
+```
 
-### `bonfire bonfires`
-
-List all bonfires.
-
-### `bonfire graph`
-
-Render graph data from a JSON file or stdin.
+**Render & Format**
 
 ```bash
 bonfire graph results.json
 cat graph.json | bonfire graph
-```
-
-### `bonfire format-chat` / `bonfire format-delve`
-
-Format raw API responses piped from stdin — useful for scripting.
-
-```bash
 curl -s ... | bonfire format-chat
 ```
 
-### `bonfire kengram`
-
-Manage kEngrams — verifiable knowledge subgraphs. Each kEngram is a curated projection of the canonical Bonfires KG with cryptographic provenance: every pinned entity gets a SHA-256 fingerprint of its content at pin time, rolled into a merkle root.
+**kEngram Management**
 
 ```bash
 bonfire kengram new "Session Name"             # create and set active
 bonfire kengram pin <uuid>                     # pin entity (auto-fetches from KG)
 bonfire kengram pin --search "rubric pipeline" # search KG, pick from results
-bonfire kengram create "Entity" --summary "…"  # push new entity to KG + pin
+bonfire kengram create "Entity" --summary "..."# push new entity to KG + pin
+bonfire kengram edge <src> <tgt> --name USES   # add edge (syncs to KG)
+bonfire kengram edge <src> <tgt> --name X --local  # local-only edge
+bonfire kengram batch changeset.json --sync    # bulk apply nodes + edges
 bonfire kengram verify                         # check against canonical KG
 bonfire kengram verify --local                 # local-only integrity check
-bonfire kengram delete <id> --force            # remove a kEngram
-bonfire kengram show                           # show active kEngram
-bonfire kengram merge <src> --into <tgt>       # merge session → topic
+bonfire kengram push                           # push local entities to KG
+bonfire kengram repin <uuid>                   # re-fetch and update hash
 bonfire kengram export                         # export to Obsidian .canvas
+bonfire kengram export --format plan           # export as markdown plan
+bonfire kengram export --format owl            # export as OWL/RDF
+bonfire kengram merge <src> --into <tgt>       # merge session -> topic
+bonfire kengram show                           # show active kEngram
 bonfire kengram list                           # list all
+bonfire kengram delete <id> --force            # remove a kEngram
 ```
 
-**How verification works:** `verify` batch-fetches all pinned entities from the canonical KG, recomputes their hashes from current KG content, and compares against the stored hashes. Per-entity status: **OK** (unchanged), **DRIFT** (KG content changed since pin), **NOT IN KG** (entity deleted). If the API is unreachable, falls back to local-only integrity checking.
+All kengram commands support `--json` for machine-readable output.
 
-**Pin modes:** Provide a UUID to auto-fetch entity metadata from the KG. Use `--search` to find entities interactively. Use `--name`/`--summary`/`--labels` for manual metadata (fallback if API is down).
+**Ontology Profiles**
 
-Set `BONFIRE_VAULT_DIR` to control where manifests and canvas files are stored (default: `~/Vaults/Bonfires/vault`).
+```bash
+bonfire kengram profile new "My Ontology"
+bonfire kengram profile attach <profile-id>
+bonfire kengram profile validate
+bonfire kengram profile suggest
+bonfire kengram profile gaps
+bonfire kengram profile match --ontology <id>
+```
 
-![kEngram API Bridge](docs/kengram-api-bridge.svg)
+### JSON Mode
+
+Every kengram and profile command supports `--json` for structured output:
+
+```bash
+bonfire kengram new "Test" --json
+# {"status": "created", "id": "ke-2026-03-28-test", "name": "Test", ...}
+
+bonfire kengram verify --json
+# {"status": "verified", "merkle_root": "abc123...", "nodes": {...}, ...}
+```
 
 ## Configuration
 
@@ -149,6 +183,7 @@ Config is loaded in this order (later overrides earlier):
 1. `~/.config/bonfires/config.env` (created by `bonfire init`)
 2. `.env` in the current directory
 3. Environment variables
+4. Explicit parameters passed to `BonfiresClient()`
 
 | Variable | Description |
 |----------|-------------|

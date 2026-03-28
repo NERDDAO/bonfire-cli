@@ -3,7 +3,6 @@
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -13,17 +12,40 @@ from rich.panel import Panel
 from rich.table import Table
 
 from bonfires import __version__
-from bonfires.api import api_get, api_post
-from bonfires.config import CONFIG_DIR, CONFIG_FILE, DEFAULT_API_URL, get_config
-from bonfires.kengram.commands import kengram as kengram_group
+from bonfires.config import CONFIG_DIR, CONFIG_FILE, DEFAULT_API_URL
 from bonfires.formatting import (
     format_chat_response,
     format_delve_response,
     format_graph,
     truncate,
 )
+from bonfires.kengram.commands import kengram as kengram_group
+from bonfires.sdk import BonfiresClient
+from bonfires.sdk.exceptions import APIError, ConfigError
 
 console = Console()
+
+
+def _get_client() -> BonfiresClient:
+    """Build a BonfiresClient from env config. Prints error + exits on failure."""
+    try:
+        return BonfiresClient()
+    except ConfigError as e:
+        console.print(f"[red]{e}[/red]")
+        console.print("Run [bold]bonfire init[/bold] to set up your configuration.")
+        sys.exit(1)
+
+
+def _handle_api_error(e: APIError) -> None:
+    """Print API error and exit."""
+    console.print(
+        Panel(
+            e.response_text[:500],
+            title=f"API Error {e.status_code}",
+            border_style="red",
+        )
+    )
+    sys.exit(1)
 
 
 def read_json_stdin():
@@ -38,6 +60,7 @@ def read_json_stdin():
 
 # --- CLI ---
 
+
 @click.group()
 @click.version_option(version=__version__, prog_name="bonfires")
 def cli():
@@ -47,7 +70,9 @@ def cli():
 @cli.command()
 @click.option("--api-url", default=None, help="API base URL.")
 @click.option("--api-key", default=None, help="API key (skip interactive prompt).")
-@click.option("--bonfire-id", default=None, help="Bonfire ID (skip interactive prompt).")
+@click.option(
+    "--bonfire-id", default=None, help="Bonfire ID (skip interactive prompt)."
+)
 @click.option("--agent-id", default=None, help="Agent ID (skip interactive prompt).")
 def init(api_url, api_key, bonfire_id, agent_id):
     """Set up Bonfires CLI configuration.
@@ -56,18 +81,21 @@ def init(api_url, api_key, bonfire_id, agent_id):
     credentials to ~/.config/bonfires/config.env.
     """
     console.print()
-    console.print(Panel.fit(
-        "[bold bright_blue]Bonfires CLI[/bold bright_blue]\n"
-        "[dim]Terminal interface for the Bonfires AI knowledge graph[/dim]",
-        border_style="bright_blue",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold bright_blue]Bonfires CLI[/bold bright_blue]\n"
+            "[dim]Terminal interface for the Bonfires AI knowledge graph[/dim]",
+            border_style="bright_blue",
+        )
+    )
     console.print()
 
     # API URL
     if not api_url:
-        api_url = console.input(
-            f"  API URL [dim]({DEFAULT_API_URL})[/dim]: "
-        ).strip() or DEFAULT_API_URL
+        api_url = (
+            console.input(f"  API URL [dim]({DEFAULT_API_URL})[/dim]: ").strip()
+            or DEFAULT_API_URL
+        )
     console.print(f"  [dim]Using:[/dim] {api_url}")
 
     # API Key
@@ -94,32 +122,47 @@ def init(api_url, api_key, bonfire_id, agent_id):
             sys.exit(1)
         console.print("[green]OK[/green]")
     except requests.RequestException as e:
-        console.print(f"[red]Failed[/red]")
+        console.print("[red]Failed[/red]")
         console.print(f"  [red]{e}[/red]")
         sys.exit(1)
 
     # Pick bonfire
     if not bonfire_id:
         bonfires_data = resp.json()
-        bonfires_list = bonfires_data if isinstance(bonfires_data, list) else bonfires_data.get("bonfires", bonfires_data.get("data", []))
+        bonfires_list = (
+            bonfires_data
+            if isinstance(bonfires_data, list)
+            else bonfires_data.get("bonfires", bonfires_data.get("data", []))
+        )
 
         if bonfires_list:
             console.print()
-            table = Table(title="Your Bonfires", title_style="bold", show_lines=False, padding=(0, 2))
+            table = Table(
+                title="Your Bonfires",
+                title_style="bold",
+                show_lines=False,
+                padding=(0, 2),
+            )
             table.add_column("#", style="bold bright_blue", width=4)
             table.add_column("Name", style="bold")
             table.add_column("ID", style="dim")
             for i, b in enumerate(bonfires_list, 1):
-                table.add_row(str(i), b.get("name", "—"), b.get("_id", b.get("id", "—")))
+                table.add_row(
+                    str(i), b.get("name", "—"), b.get("_id", b.get("id", "—"))
+                )
             console.print(table)
             console.print()
 
-            choice = console.input(f"  Select bonfire [dim](1-{len(bonfires_list)})[/dim]: ").strip()
+            choice = console.input(
+                f"  Select bonfire [dim](1-{len(bonfires_list)})[/dim]: "
+            ).strip()
             try:
                 idx = int(choice) - 1
                 selected = bonfires_list[idx]
                 bonfire_id = selected.get("_id", selected.get("id"))
-                console.print(f"  [dim]Selected:[/dim] {selected.get('name', bonfire_id)}")
+                console.print(
+                    f"  [dim]Selected:[/dim] {selected.get('name', bonfire_id)}"
+                )
             except (ValueError, IndexError):
                 console.print("[red]  Invalid selection.[/red]")
                 sys.exit(1)
@@ -132,15 +175,29 @@ def init(api_url, api_key, bonfire_id, agent_id):
         console.print("  [dim]Fetching agents...[/dim]", end=" ")
         headers["X-Bonfire-Id"] = bonfire_id
         try:
-            resp = requests.get(f"{api_url}/agents", params={"bonfire_id": bonfire_id}, headers=headers, timeout=10)
+            resp = requests.get(
+                f"{api_url}/agents",
+                params={"bonfire_id": bonfire_id},
+                headers=headers,
+                timeout=10,
+            )
             if resp.ok:
                 console.print("[green]OK[/green]")
                 agents_data = resp.json()
-                agents_list = agents_data if isinstance(agents_data, list) else agents_data.get("agents", agents_data.get("data", []))
+                agents_list = (
+                    agents_data
+                    if isinstance(agents_data, list)
+                    else agents_data.get("agents", agents_data.get("data", []))
+                )
 
                 if agents_list:
                     console.print()
-                    table = Table(title="Agents", title_style="bold", show_lines=False, padding=(0, 2))
+                    table = Table(
+                        title="Agents",
+                        title_style="bold",
+                        show_lines=False,
+                        padding=(0, 2),
+                    )
                     table.add_column("#", style="bold bright_blue", width=4)
                     table.add_column("Name", style="bold")
                     table.add_column("ID", style="dim")
@@ -155,12 +212,16 @@ def init(api_url, api_key, bonfire_id, agent_id):
                     console.print(table)
                     console.print()
 
-                    choice = console.input(f"  Select agent [dim](1-{len(agents_list)})[/dim]: ").strip()
+                    choice = console.input(
+                        f"  Select agent [dim](1-{len(agents_list)})[/dim]: "
+                    ).strip()
                     try:
                         idx = int(choice) - 1
                         selected = agents_list[idx]
                         agent_id = selected.get("_id", selected.get("id"))
-                        console.print(f"  [dim]Selected:[/dim] {selected.get('name', agent_id)}")
+                        console.print(
+                            f"  [dim]Selected:[/dim] {selected.get('name', agent_id)}"
+                        )
                     except (ValueError, IndexError):
                         console.print("[red]  Invalid selection.[/red]")
                         sys.exit(1)
@@ -188,15 +249,17 @@ def init(api_url, api_key, bonfire_id, agent_id):
     CONFIG_FILE.chmod(0o600)
 
     console.print()
-    console.print(Panel.fit(
-        f"[bold green]Configuration saved[/bold green]\n\n"
-        f"  [dim]Config:[/dim] {CONFIG_FILE}\n"
-        f"  [dim]API URL:[/dim] {api_url}\n"
-        f"  [dim]Bonfire:[/dim] {bonfire_id}\n"
-        f"  [dim]Agent:[/dim] {agent_id}\n\n"
-        f"  Try it: [bold]bonfire chat \"hello\"[/bold]",
-        border_style="green",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]Configuration saved[/bold green]\n\n"
+            f"  [dim]Config:[/dim] {CONFIG_FILE}\n"
+            f"  [dim]API URL:[/dim] {api_url}\n"
+            f"  [dim]Bonfire:[/dim] {bonfire_id}\n"
+            f"  [dim]Agent:[/dim] {agent_id}\n\n"
+            f'  Try it: [bold]bonfire chat "hello"[/bold]',
+            border_style="green",
+        )
+    )
 
     # Sync Claude Code skills from repo to ~/.claude/skills/
     _sync_skills()
@@ -205,7 +268,8 @@ def init(api_url, api_key, bonfire_id, agent_id):
 @cli.command()
 @click.argument("message")
 @click.option(
-    "--graph-mode", "-g",
+    "--graph-mode",
+    "-g",
     default="regenerate",
     type=click.Choice(["regenerate", "append", "adaptive", "static"]),
     help="Graph interaction mode (default: regenerate).",
@@ -216,15 +280,11 @@ def chat(message, graph_mode):
     By default, queries the knowledge graph and builds a fresh context graph
     for each message. Use --graph-mode to change this behavior.
     """
-    cfg = get_config()
-    body = {
-        "message": message,
-        "agent_id": cfg["agent_id"],
-        "bonfire_id": cfg["bonfire_id"],
-        "chat_history": [],
-        "graph_mode": graph_mode,
-    }
-    data = api_post(cfg, f"/agents/{cfg['agent_id']}/chat", body)
+    client = _get_client()
+    try:
+        data = client.agents.chat(message, graph_mode=graph_mode)
+    except APIError as e:
+        _handle_api_error(e)
     format_chat_response(data)
 
 
@@ -233,23 +293,22 @@ def chat(message, graph_mode):
 @click.option("-n", "--num-results", default=10, help="Number of results to return.")
 def delve(query, num_results):
     """Search the Bonfires knowledge graph."""
-    cfg = get_config()
-    body = {
-        "query": query,
-        "bonfire_id": cfg["bonfire_id"],
-        "num_results": num_results,
-        "agent_id": cfg["agent_id"],
-    }
-    data = api_post(cfg, "/delve", body)
+    client = _get_client()
+    try:
+        data = client.kg.search(query, num_results=num_results)
+    except APIError as e:
+        _handle_api_error(e)
     format_delve_response(data, query)
 
 
 @cli.command()
 def agents():
     """List agents for the configured bonfire."""
-    cfg = get_config()
-    data = api_get(cfg, "/agents", params={"bonfire_id": cfg["bonfire_id"]})
-    agents_list = data if isinstance(data, list) else data.get("agents", data.get("data", []))
+    client = _get_client()
+    try:
+        agents_list = client.agents.list()
+    except APIError as e:
+        _handle_api_error(e)
     table = Table(title="Agents", title_style="bold green")
     table.add_column("Name", style="bold")
     table.add_column("ID", style="dim")
@@ -266,9 +325,11 @@ def agents():
 @cli.command(name="bonfires")
 def list_bonfires():
     """List all bonfires."""
-    cfg = get_config()
-    data = api_get(cfg, "/bonfires")
-    bonfires_list = data if isinstance(data, list) else data.get("bonfires", data.get("data", []))
+    client = _get_client()
+    try:
+        bonfires_list = client.agents.list_bonfires()
+    except APIError as e:
+        _handle_api_error(e)
     table = Table(title="Bonfires", title_style="bold green")
     table.add_column("Name", style="bold")
     table.add_column("ID", style="dim")
@@ -309,7 +370,13 @@ def graph(file):
 
 @cli.command()
 @click.argument("message")
-@click.option("-f", "--file", "file_path", type=click.Path(exists=True), help="Ingest a .md file as a document.")
+@click.option(
+    "-f",
+    "--file",
+    "file_path",
+    type=click.Path(exists=True),
+    help="Ingest a .md file as a document.",
+)
 @click.option("--title", default=None, help="Title for the ingested document.")
 def sync(message, file_path, title):
     """Push context to the Bonfires knowledge graph.
@@ -317,71 +384,47 @@ def sync(message, file_path, title):
     The message is always pushed to the stack. Optionally pass -f to also
     ingest a markdown file as a document.
     """
-    cfg = get_config()
-
+    client = _get_client()
     chat_id = _git_chat_id()
-    repo = chat_id.split(":")[0] if ":" in chat_id else "unknown"
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    console.print("[bold]1/2[/bold] Pushing to stack...", end=" ")
-    stack_body = {
-        "message": {
-            "userId": "claude-code",
-            "chatId": chat_id,
-            "role": "assistant",
-            "text": message,
-            "timestamp": timestamp,
-        },
-        "metadata": {
-            "type": "memory-sync",
-            "source": "bonfire-cli",
-            "repo": repo,
-        },
-    }
-    stack_resp = api_post(cfg, f"/agents/{cfg['agent_id']}/stack/add", stack_body)
-    if stack_resp.get("success"):
-        console.print("[green]OK[/green]")
-    else:
-        console.print("[red]FAILED[/red]")
-        console.print(stack_resp)
+    if file_path and not file_path.endswith(".md"):
+        console.print(
+            f"[yellow]Warning:[/yellow] Only .md files supported for now, got {file_path}"
+        )
         return
 
-    console.print("[bold]2/2[/bold] Processing stack...", end=" ")
-    api_post(cfg, f"/agents/{cfg['agent_id']}/stack/process", {})
-    console.print("[green]OK[/green]")
+    try:
+        console.print("[bold]1/2[/bold] Pushing to stack...", end=" ")
+        result = client.agents.sync(
+            message, chat_id=chat_id, file_path=file_path, title=title
+        )
+        console.print("[green]OK[/green]")
 
-    if file_path:
-        if not file_path.endswith(".md"):
-            console.print(f"[yellow]Warning:[/yellow] Only .md files supported for now, got {file_path}")
-            return
-        console.print(f"[bold]+[/bold] Ingesting [cyan]{file_path}[/cyan]...", end=" ")
-        content = Path(file_path).read_text()
-        doc_title = title or Path(file_path).stem.replace("-", " ").replace("_", " ").title()
-        ingest_body = {
-            "content": content,
-            "title": doc_title,
-            "bonfire_id": cfg["bonfire_id"],
-            "agent_id": cfg["agent_id"],
-            "metadata": {
-                "type": "memory-sync",
-                "source": "bonfire-cli",
-                "repo": repo,
-                "file": file_path,
-            },
-        }
-        ingest_resp = api_post(cfg, "/ingest_content", ingest_body)
-        doc_id = ingest_resp.get("document_id", "unknown")
-        console.print(f"[green]OK[/green] (doc: [dim]{doc_id}[/dim])")
+        console.print("[bold]2/2[/bold] Processing stack...", end=" ")
+        console.print("[green]OK[/green]")
 
-    console.print(Panel(
-        f"[bold]Context synced[/bold]\n\n"
-        f"  Chat ID: [cyan]{chat_id}[/cyan]\n"
-        f"  Repo: [cyan]{repo}[/cyan]\n"
-        f"  Message: {truncate(message, 80)}"
-        + (f"\n  File: [cyan]{file_path}[/cyan]" if file_path else ""),
-        title="Sync Complete",
-        border_style="green",
-    ))
+        if file_path:
+            doc_id = result.get("document_id", "unknown")
+            console.print(
+                f"[bold]+[/bold] Ingested [cyan]{file_path}[/cyan] "
+                f"(doc: [dim]{doc_id}[/dim])"
+            )
+    except APIError as e:
+        console.print("[red]FAILED[/red]")
+        _handle_api_error(e)
+
+    repo = chat_id.split(":")[0] if ":" in chat_id else "unknown"
+    console.print(
+        Panel(
+            f"[bold]Context synced[/bold]\n\n"
+            f"  Chat ID: [cyan]{chat_id}[/cyan]\n"
+            f"  Repo: [cyan]{repo}[/cyan]\n"
+            f"  Message: {truncate(message, 80)}"
+            + (f"\n  File: [cyan]{file_path}[/cyan]" if file_path else ""),
+            title="Sync Complete",
+            border_style="green",
+        )
+    )
 
 
 def _sync_skills() -> None:
@@ -426,13 +469,21 @@ def _git_chat_id():
     try:
         toplevel = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         branch = subprocess.run(
             ["git", "branch", "--show-current"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
-        repo = Path(toplevel.stdout.strip()).name if toplevel.returncode == 0 else "unknown"
+        repo = (
+            Path(toplevel.stdout.strip()).name
+            if toplevel.returncode == 0
+            else "unknown"
+        )
         br = branch.stdout.strip() if branch.returncode == 0 else "unknown"
         return f"{repo}:{br}"
     except Exception:

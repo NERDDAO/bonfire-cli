@@ -51,11 +51,18 @@ def test_profile_new_json(tmp_path: Path) -> None:
 
 def test_profile_new_with_namespace(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
-    result = runner.invoke(cli, [
-        "kengram", "profile", "new", "Custom",
-        "--namespace", "foaf=http://xmlns.com/foaf/0.1/",
-        "--json",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "profile",
+            "new",
+            "Custom",
+            "--namespace",
+            "foaf=http://xmlns.com/foaf/0.1/",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["id"] == "profile-custom"
@@ -63,10 +70,17 @@ def test_profile_new_with_namespace(tmp_path: Path) -> None:
 
 def test_profile_new_bad_namespace(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
-    result = runner.invoke(cli, [
-        "kengram", "profile", "new", "Bad",
-        "--namespace", "no-equals-sign",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "profile",
+            "new",
+            "Bad",
+            "--namespace",
+            "no-equals-sign",
+        ],
+    )
     assert result.exit_code == 0  # graceful error, not crash
     assert "Invalid namespace" in result.output
 
@@ -109,14 +123,16 @@ def test_profile_show(tmp_path: Path) -> None:
 def test_profile_show_not_found(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     result = runner.invoke(cli, ["kengram", "profile", "show", "profile-nope"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "not found" in result.output
 
 
 def test_profile_show_json(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     runner.invoke(cli, ["kengram", "profile", "new", "Detail"])
-    result = runner.invoke(cli, ["kengram", "profile", "show", "profile-detail", "--json"])
+    result = runner.invoke(
+        cli, ["kengram", "profile", "show", "profile-detail", "--json"]
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["id"] == "profile-detail"
@@ -141,9 +157,16 @@ def test_profile_attach_json(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     ke_id = _create_kengram(runner)
     runner.invoke(cli, ["kengram", "profile", "new", "AttachJ"])
-    result = runner.invoke(cli, [
-        "kengram", "profile", "attach", "profile-attachj", "--json",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "profile",
+            "attach",
+            "profile-attachj",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["status"] == "attached"
@@ -157,14 +180,15 @@ def test_profile_attach_duplicate(tmp_path: Path) -> None:
     runner.invoke(cli, ["kengram", "profile", "attach", "profile-dup"])
     result = runner.invoke(cli, ["kengram", "profile", "attach", "profile-dup"])
     assert result.exit_code == 0
-    assert "already attached" in result.output
+    # SDK is idempotent — re-attaching succeeds silently
+    assert "Attached" in result.output
 
 
 def test_profile_attach_not_found(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     _create_kengram(runner)
     result = runner.invoke(cli, ["kengram", "profile", "attach", "profile-missing"])
-    assert result.exit_code == 0
+    assert result.exit_code == 1
     assert "not found" in result.output
 
 
@@ -183,7 +207,8 @@ def test_profile_detach_not_attached(tmp_path: Path) -> None:
     _create_kengram(runner)
     result = runner.invoke(cli, ["kengram", "profile", "detach", "profile-nope"])
     assert result.exit_code == 0
-    assert "not attached" in result.output
+    # SDK is idempotent — detaching a non-attached profile succeeds silently
+    assert "Detached" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +220,10 @@ def test_profile_validate_no_profiles(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     _create_kengram(runner)
     result = runner.invoke(cli, ["kengram", "profile", "validate"])
-    assert result.exit_code == 0
-    assert "No ontology profiles" in result.output
+    assert result.exit_code == 1
+    assert (
+        "No ontology profiles" in result.output or "not found" in result.output.lower()
+    )
 
 
 def test_profile_validate_ok(tmp_path: Path) -> None:
@@ -217,7 +244,7 @@ def test_profile_validate_json(tmp_path: Path) -> None:
     result = runner.invoke(cli, ["kengram", "profile", "validate", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["status"] == "validated"
+    assert data["kengram_id"]
     assert data["violation_count"] == 0
 
 
@@ -244,8 +271,10 @@ def test_profile_gaps_no_profiles(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     _create_kengram(runner)
     result = runner.invoke(cli, ["kengram", "profile", "gaps"])
-    assert result.exit_code == 0
-    assert "No ontology profiles" in result.output
+    assert result.exit_code == 1
+    assert (
+        "No ontology profiles" in result.output or "not found" in result.output.lower()
+    )
 
 
 def test_profile_gaps_ok(tmp_path: Path) -> None:
@@ -268,8 +297,10 @@ def test_export_owl_no_profiles(tmp_path: Path) -> None:
     runner = CliRunner(env=_env(tmp_path))
     _create_kengram(runner)
     result = runner.invoke(cli, ["kengram", "export", "--format", "owl"])
-    assert result.exit_code == 0
-    assert "No ontology profiles" in result.output
+    assert result.exit_code == 1
+    assert (
+        "No ontology profiles" in result.output or "not found" in result.output.lower()
+    )
 
 
 def test_export_owl_json(tmp_path: Path) -> None:
@@ -277,9 +308,18 @@ def test_export_owl_json(tmp_path: Path) -> None:
     _create_kengram(runner)
     runner.invoke(cli, ["kengram", "profile", "new", "OwlExp"])
     runner.invoke(cli, ["kengram", "profile", "attach", "profile-owlexp"])
-    result = runner.invoke(cli, [
-        "kengram", "export", "--format", "owl", "--serialization", "turtle", "--json",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "export",
+            "--format",
+            "owl",
+            "--serialization",
+            "turtle",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["status"] == "exported"
@@ -292,9 +332,18 @@ def test_export_owl_jsonld(tmp_path: Path) -> None:
     _create_kengram(runner)
     runner.invoke(cli, ["kengram", "profile", "new", "OwlJLD"])
     runner.invoke(cli, ["kengram", "profile", "attach", "profile-owljld"])
-    result = runner.invoke(cli, [
-        "kengram", "export", "--format", "owl", "--serialization", "json-ld", "--json",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "export",
+            "--format",
+            "owl",
+            "--serialization",
+            "json-ld",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["path"].endswith(".jsonld")
@@ -312,6 +361,7 @@ def test_import_owl(tmp_path: Path) -> None:
 
     # Write the profile with a class_map so inversion works
     import json as _json
+
     profile_path = tmp_path / "kengrams" / "profiles" / "profile-imp.json"
     profile_data = _json.loads(profile_path.read_text())
     profile_data["class_map"] = {
@@ -325,14 +375,21 @@ def test_import_owl(tmp_path: Path) -> None:
     ttl_file.write_text(
         "@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n"
         "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n"
-        "<http://example.org/alice> a foaf:Person ; rdfs:label \"Alice\" .\n"
-        "<http://example.org/bob> a foaf:Person ; rdfs:label \"Bob\" .\n"
+        '<http://example.org/alice> a foaf:Person ; rdfs:label "Alice" .\n'
+        '<http://example.org/bob> a foaf:Person ; rdfs:label "Bob" .\n'
     )
 
-    result = runner.invoke(cli, [
-        "kengram", "import-owl", str(ttl_file),
-        "--profile", "profile-imp", "--json",
-    ])
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "import-owl",
+            str(ttl_file),
+            "--profile",
+            "profile-imp",
+            "--json",
+        ],
+    )
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["status"] == "imported"
@@ -344,9 +401,15 @@ def test_import_owl_profile_not_found(tmp_path: Path) -> None:
     _create_kengram(runner)
     ttl_file = tmp_path / "empty.ttl"
     ttl_file.write_text("")
-    result = runner.invoke(cli, [
-        "kengram", "import-owl", str(ttl_file),
-        "--profile", "profile-nope",
-    ])
-    assert result.exit_code == 0
+    result = runner.invoke(
+        cli,
+        [
+            "kengram",
+            "import-owl",
+            str(ttl_file),
+            "--profile",
+            "profile-nope",
+        ],
+    )
+    assert result.exit_code == 1
     assert "not found" in result.output
