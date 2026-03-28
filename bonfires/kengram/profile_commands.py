@@ -358,8 +358,6 @@ def profile_suggest(kengram_id: str | None, output_json: bool) -> None:
         console.print("[dim]No profiles available.[/dim]")
         return
 
-    from bonfires.kengram.ontology_profile import OntologyProfile
-
     all_profiles = [
         p for pid in [d["id"] for d in all_profiles_data]
         if (p := store.load_profile(pid)) is not None
