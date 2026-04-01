@@ -137,6 +137,50 @@ class KGService:
             },
         )
 
+    def get_latest_episodes(
+        self,
+        agent_id: str | None = None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Fetch the most recent episodes for the agent.
+
+        Returns a list of episode dicts with uuid, name, content, valid_at, etc.
+        """
+        aid = agent_id or self._config.agent_id
+        result = _get(
+            self._config,
+            f"/knowledge_graph/agents/{aid}/episodes/latest",
+            params={
+                "bonfire_id": self._config.bonfire_id,
+                "limit": limit,
+            },
+        )
+        if isinstance(result, dict):
+            return result.get("episodes", [])
+        return []
+
+    def get_latest_episode(
+        self,
+        agent_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch the single most recent episode. Returns None if no episodes."""
+        episodes = self.get_latest_episodes(agent_id=agent_id, limit=1)
+        return episodes[0] if episodes else None
+
+    def get_node_episodes(
+        self,
+        node_uuid: str,
+    ) -> list[dict[str, Any]]:
+        """Fetch episodes that mention a specific entity node."""
+        result = _get(
+            self._config,
+            f"/knowledge_graph/node/{node_uuid}/episodes",
+            params={"bonfire_id": self._config.bonfire_id},
+        )
+        if isinstance(result, dict):
+            return result.get("episodes", [])
+        return []
+
     def ingest_ontology(
         self,
         ontology_path: str,

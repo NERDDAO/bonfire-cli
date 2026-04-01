@@ -16,6 +16,7 @@ from bonfires.config import CONFIG_DIR, CONFIG_FILE, DEFAULT_API_URL
 from bonfires.formatting import (
     format_chat_response,
     format_delve_response,
+    format_episodes,
     format_graph,
     truncate,
 )
@@ -299,6 +300,65 @@ def delve(query, num_results):
     except APIError as e:
         _handle_api_error(e)
     format_delve_response(data, query)
+
+
+@cli.group()
+def episodes():
+    """Browse and inspect episodes."""
+    pass
+
+
+@episodes.command(name="latest")
+@click.option("-n", "--num", default=5, help="Number of episodes to return.")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON.")
+def episodes_latest(num, output_json):
+    """Show the most recent episodes."""
+    client = _get_client()
+    try:
+        eps = client.kg.get_latest_episodes(limit=num)
+    except APIError as e:
+        _handle_api_error(e)
+    if output_json:
+        import json as _json
+
+        console.print(_json.dumps(eps, indent=2, default=str))
+        return
+    if not eps:
+        console.print("[dim]No episodes found.[/dim]")
+        return
+    format_episodes(eps)
+
+
+@episodes.command(name="show")
+@click.argument("uuid")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON.")
+def episodes_show(uuid, output_json):
+    """Show a single episode by UUID."""
+    client = _get_client()
+    try:
+        from bonfires.sdk.http import _get
+
+        result = _get(
+            client._config,
+            f"/knowledge_graph/episode/{uuid}",
+            params={"bonfire_id": client._config.bonfire_id},
+        )
+    except APIError as e:
+        _handle_api_error(e)
+    if output_json:
+        import json as _json
+
+        console.print(_json.dumps(result, indent=2, default=str))
+        return
+    if isinstance(result, dict):
+        ep = result.get("episode", result)
+        console.print(Panel(
+            f"[bold]{ep.get('name', '—')}[/bold]\n\n"
+            f"{ep.get('content', {}).get('content', '') if isinstance(ep.get('content'), dict) else ''}\n\n"
+            f"[dim]UUID: {ep.get('uuid', '—')}[/dim]\n"
+            f"[dim]Date: {(ep.get('valid_at') or ep.get('created_at', ''))[:19]}[/dim]",
+            title="Episode",
+        ))
 
 
 @cli.command()
