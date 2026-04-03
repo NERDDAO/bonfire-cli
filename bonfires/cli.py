@@ -361,25 +361,138 @@ def episodes_show(uuid, output_json):
         ))
 
 
-@cli.command()
-def agents():
-    """List agents for the configured bonfire."""
+@cli.group(name="agents", invoke_without_command=True)
+@click.pass_context
+def agents_group(ctx):
+    """Manage agents — list, create, show, update, delete."""
+    if ctx.invoked_subcommand is None:
+        # Default: list agents (backwards compat with old `bonfire agents`)
+        client = _get_client()
+        try:
+            agents_list = client.agents.list()
+        except APIError as e:
+            _handle_api_error(e)
+        table = Table(title="Agents", title_style="bold green")
+        table.add_column("Name", style="bold")
+        table.add_column("ID", style="dim")
+        table.add_column("Platform", style="cyan")
+        table.add_column("Active", style="green")
+        for a in agents_list:
+            table.add_row(
+                a.get("name", "—"),
+                a.get("_id", a.get("id", "—")),
+                a.get("deploymentConfiguration", {}).get("platform", "—"),
+                "✓" if a.get("is_active") or a.get("isActive") else "✗",
+            )
+        console.print(table)
+
+
+@agents_group.command(name="create")
+@click.argument("name")
+@click.argument("username")
+@click.option("--context", "-c", required=True, help="System prompt / personality.")
+@click.option("--platform", default="matrix", help="Platform: matrix, telegram, discord.")
+@click.option("--tools", "-t", multiple=True, help="MCP tool provider IDs to enable.")
+@click.option("--env", "-e", multiple=True, help="Env vars as KEY=VALUE pairs.")
+@click.option("--matrix-homeserver", default="", help="Matrix homeserver URL.")
+@click.option("--matrix-as-token", default="", help="Matrix appservice token.")
+@click.option("--matrix-hs-token", default="", help="Matrix homeserver token.")
+@click.option("--inactive", is_flag=True, help="Create as inactive (don't start immediately).")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON.")
+def agents_create(name, username, context, platform, tools, env, matrix_homeserver,
+                  matrix_as_token, matrix_hs_token, inactive, output_json):
+    """Create a new agent on the configured bonfire."""
     client = _get_client()
+
+    # Parse env vars
+    env_vars = {}
+    for e in env:
+        if "=" in e:
+            k, v = e.split("=", 1)
+            env_vars[k] = v
+
+    # Build deployment config
+    deploy_config: dict = {}
+    if matrix_homeserver:
+        deploy_config["matrixHomeserverUrl"] = matrix_homeserver
+    if matrix_as_token:
+        deploy_config["matrixAsToken"] = matrix_as_token
+    if matrix_hs_token:
+        deploy_config["matrixHsToken"] = matrix_hs_token
+
     try:
-        agents_list = client.agents.list()
+        result = client.agents.create(
+            name=name,
+            username=username,
+            context=context,
+            platform=platform,
+            is_active=not inactive,
+            deployment_config=deploy_config or None,
+            enabled_mcp_tools=list(tools) if tools else None,
+            agent_env_vars=env_vars or None,
+        )
     except APIError as e:
         _handle_api_error(e)
-    table = Table(title="Agents", title_style="bold green")
-    table.add_column("Name", style="bold")
-    table.add_column("ID", style="dim")
-    table.add_column("Description", max_width=50)
-    for a in agents_list:
-        table.add_row(
-            a.get("name", "—"),
-            a.get("_id", a.get("id", "—")),
-            truncate(a.get("description", ""), 50),
-        )
-    console.print(table)
+
+    if output_json:
+        import json as _json
+        console.print(_json.dumps(result, indent=2, default=str))
+        return
+
+    agent_id = result.get("_id", result.get("id", "—"))
+    console.print(Panel(
+        f"[bold]{name}[/bold] (@{username})\n\n"
+        f"[dim]ID: {agent_id}[/dim]\n"
+        f"Platform: {platform}\n"
+        f"Active: {'yes' if not inactive else 'no'}\n"
+        f"Tools: {', '.join(tools) if tools else 'none'}",
+        title="[green]Agent Created[/green]",
+    ))
+
+
+@agents_group.command(name="show")
+@click.argument("agent_id")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON.")
+def agents_show(agent_id, output_json):
+    """Show details for a specific agent."""
+    client = _get_client()
+    try:
+        data = client.agents.get(agent_id)
+    except APIError as e:
+        _handle_api_error(e)
+
+    if output_json:
+        import json as _json
+        console.print(_json.dumps(data, indent=2, default=str))
+        return
+
+    agent = data.get("agent", data) if isinstance(data, dict) else data
+    deploy = agent.get("deploymentConfiguration", {})
+    features = agent.get("agentFeatures", {})
+    tools_list = agent.get("enabledMcpTools", [])
+
+    console.print(Panel(
+        f"[bold]{agent.get('name', '—')}[/bold] (@{agent.get('username', '—')})\n\n"
+        f"[dim]ID: {agent.get('_id', agent.get('id', '—'))}[/dim]\n"
+        f"Platform: {deploy.get('platform', '—')}\n"
+        f"Active: {'yes' if agent.get('is_active') or agent.get('isActive') else 'no'}\n"
+        f"Tools: {', '.join(tools_list) if tools_list else 'none'}\n\n"
+        f"[dim]Context:[/dim]\n{truncate(agent.get('context', ''), 300)}",
+        title="Agent Details",
+    ))
+
+
+@agents_group.command(name="delete")
+@click.argument("agent_id")
+@click.confirmation_option(prompt="Are you sure you want to delete this agent?")
+def agents_delete(agent_id):
+    """Delete an agent."""
+    client = _get_client()
+    try:
+        client.agents.delete(agent_id)
+    except APIError as e:
+        _handle_api_error(e)
+    console.print(f"[green]Deleted agent {agent_id}[/green]")
 
 
 @cli.command(name="bonfires")

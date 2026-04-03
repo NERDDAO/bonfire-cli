@@ -7,14 +7,95 @@ from pathlib import Path
 from typing import Any
 
 from bonfires.sdk.config import BonfiresConfig
-from bonfires.sdk.http import _get, _post
+from bonfires.sdk.http import _delete, _get, _post, _put
 
 
 class AgentService:
-    """Operations on Bonfires agents — chat, sync, list."""
+    """Operations on Bonfires agents — CRUD, chat, sync."""
 
     def __init__(self, config: BonfiresConfig) -> None:
         self._config = config
+
+    # ── CRUD ──
+
+    def create(
+        self,
+        *,
+        name: str,
+        username: str,
+        context: str,
+        platform: str = "matrix",
+        is_active: bool = True,
+        timezone: str = "UTC",
+        deployment_config: dict[str, Any] | None = None,
+        agent_features: dict[str, Any] | None = None,
+        chat_config: dict[str, Any] | None = None,
+        enabled_mcp_tools: list[str] | None = None,
+        enabled_skills: list[str] | None = None,
+        agent_env_vars: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Create a new agent on the configured bonfire.
+
+        Returns the created agent dict with _id, username, name, etc.
+        """
+        body: dict[str, Any] = {
+            "username": username,
+            "name": name,
+            "context": context,
+            "bonfireId": self._config.bonfire_id,
+            "isActive": is_active,
+            "timezone": timezone,
+            "deploymentConfiguration": {
+                "platform": platform,
+                "bonfireId": self._config.bonfire_id,
+                **(deployment_config or {}),
+            },
+        }
+        if agent_features:
+            body["agentFeatures"] = agent_features
+        if chat_config:
+            body["chatConfig"] = chat_config
+        if enabled_mcp_tools:
+            body["enabledMcpTools"] = enabled_mcp_tools
+        if enabled_skills:
+            body["enabledSkills"] = enabled_skills
+        if agent_env_vars:
+            body["agentEnvVars"] = agent_env_vars
+        return _post(self._config, "/agents", body=body)
+
+    def get(self, agent_id: str) -> dict[str, Any]:
+        """Fetch a single agent by ID."""
+        return _get(
+            self._config,
+            f"/agents/{agent_id}",
+            params={"bonfire_id": self._config.bonfire_id},
+        )
+
+    def update(self, agent_id: str, **fields: Any) -> dict[str, Any]:
+        """Update an existing agent. Pass only the fields to change."""
+        return _put(
+            self._config,
+            f"/agents/{agent_id}",
+            body={"bonfire_id": self._config.bonfire_id, **fields},
+        )
+
+    def set_env_vars(self, agent_id: str, env_vars: dict[str, str]) -> dict[str, Any]:
+        """Set environment variables for an agent."""
+        return _put(
+            self._config,
+            f"/agents/{agent_id}/env-vars",
+            body={"variables": env_vars},
+        )
+
+    def delete(self, agent_id: str) -> dict[str, Any]:
+        """Delete an agent."""
+        return _delete(
+            self._config,
+            f"/agents/{agent_id}",
+            params={"bonfire_id": self._config.bonfire_id},
+        )
+
+    # ── Chat & Sync ──
 
     def chat(self, message: str, graph_mode: str = "regenerate") -> dict[str, Any]:
         """Send a message to the bonfire agent. Returns the full response dict."""

@@ -55,6 +55,42 @@ def _post(config: BonfiresConfig, path: str, body: dict[str, Any]) -> dict[str, 
     return resp.json()
 
 
+def _put(config: BonfiresConfig, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    """PUT to the Bonfires API and return parsed JSON."""
+    url = f"{config.api_url}{path}"
+    try:
+        resp = requests.put(url, json=body, headers=_headers(config), timeout=30)
+    except requests.RequestException as e:
+        raise APIError(f"Connection error: {e}", status_code=0, response_text="") from e
+    if not resp.ok:
+        text = resp.text[:500]
+        if resp.status_code == 404:
+            raise NotFoundError(f"Not found: {path}", status_code=resp.status_code, response_text=text)
+        if resp.status_code in (401, 403):
+            raise AuthenticationError(f"Authentication failed: {path}", status_code=resp.status_code, response_text=text)
+        raise APIError(f"API error {resp.status_code}: {path}", status_code=resp.status_code, response_text=text)
+    return resp.json()
+
+
+def _delete(config: BonfiresConfig, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    """DELETE from the Bonfires API and return parsed JSON."""
+    url = f"{config.api_url}{path}"
+    try:
+        resp = requests.delete(url, params=params, headers=_headers(config), timeout=30)
+    except requests.RequestException as e:
+        raise APIError(f"Connection error: {e}", status_code=0, response_text="") from e
+    if not resp.ok:
+        text = resp.text[:500]
+        if resp.status_code == 404:
+            raise NotFoundError(f"Not found: {path}", status_code=resp.status_code, response_text=text)
+        if resp.status_code in (401, 403):
+            raise AuthenticationError(f"Authentication failed: {path}", status_code=resp.status_code, response_text=text)
+        raise APIError(f"API error {resp.status_code}: {path}", status_code=resp.status_code, response_text=text)
+    if resp.status_code == 204:
+        return {}
+    return resp.json()
+
+
 def _get(
     config: BonfiresConfig,
     path: str,
