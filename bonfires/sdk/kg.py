@@ -104,17 +104,21 @@ class KGService:
         name: str,
         labels: list[str],
         summary: str,
+        attributes: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Update an existing entity's name, summary, and labels."""
+        """Update an existing entity's name, summary, labels, and optionally attributes."""
+        body: dict[str, Any] = {
+            "bonfire_id": self._config.bonfire_id,
+            "name": name,
+            "labels": labels,
+            "summary": summary,
+        }
+        if attributes is not None:
+            body["attributes"] = attributes
         return _post(
             self._config,
             f"/knowledge_graph/entity/{uuid}/update",
-            body={
-                "bonfire_id": self._config.bonfire_id,
-                "name": name,
-                "labels": labels,
-                "summary": summary,
-            },
+            body=body,
         )
 
     def create_edge(
