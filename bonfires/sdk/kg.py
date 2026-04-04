@@ -231,3 +231,108 @@ class KGService:
                 "threshold": threshold,
             },
         )
+
+    def get_edges(
+        self,
+        entity_uuid: str,
+        direction: str = "both",
+        edge_type: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Get edges for an entity via expand endpoint. Filters by direction and type."""
+        result = _post(
+            self._config,
+            "/knowledge_graph/expand/entity",
+            body={
+                "entity_uuid": entity_uuid,
+                "bonfire_id": self._config.bonfire_id,
+                "limit": limit,
+            },
+        )
+        edges = result.get("edges", [])
+        nodes = {n.get("uuid", ""): n for n in result.get("nodes", [])}
+
+        filtered = []
+        for edge in edges:
+            src = edge.get("source_node_uuid", "")
+            tgt = edge.get("target_node_uuid", "")
+
+            if direction == "outgoing" and src != entity_uuid:
+                continue
+            if direction == "incoming" and tgt != entity_uuid:
+                continue
+
+            edge_name = edge.get("name", "")
+            if edge_type and edge_name.upper() != edge_type.upper():
+                continue
+
+            # Enrich with node names from expand response
+            other_uuid = tgt if src == entity_uuid else src
+            other_node = nodes.get(other_uuid, {})
+
+            filtered.append(
+                {
+                    "uuid": edge.get("uuid", ""),
+                    "name": edge_name,
+                    "fact": edge.get("fact", ""),
+                    "source": {
+                        "uuid": src,
+                        "name": other_node.get("name", "")
+                        if src != entity_uuid
+                        else "",
+                    },
+                    "target": {
+                        "uuid": tgt,
+                        "name": other_node.get("name", "")
+                        if tgt != entity_uuid
+                        else "",
+                    },
+                    "valid_at": edge.get("valid_at"),
+                    "expired_at": edge.get("expired_at"),
+                    "invalid_at": edge.get("invalid_at"),
+                }
+            )
+        return filtered
+
+    def update_edge(
+        self,
+        edge_uuid: str,
+        expired_at: str | None = None,
+        name: str | None = None,
+        fact: str | None = None,
+    ) -> dict[str, Any]:
+        """Update edge fields (expired_at for invalidation, name, fact)."""
+        body: dict[str, Any] = {"bonfire_id": self._config.bonfire_id}
+        if expired_at is not None:
+            body["expired_at"] = expired_at
+        if name is not None:
+            body["name"] = name
+        if fact is not None:
+            body["fact"] = fact
+        return _post(
+            self._config,
+            f"/knowledge_graph/edge/{edge_uuid}/update",
+            body=body,
+        )
+
+    def add_triplet(
+        self,
+        source_uuid: str,
+        source_name: str,
+        target_uuid: str,
+        target_name: str,
+        edge_name: str,
+        fact: str = "",
+    ) -> dict[str, Any]:
+        """Create an edge between two entities by UUID + name (triplet pattern)."""
+        return _post(
+            self._config,
+            "/knowledge_graph/edge",
+            body={
+                "bonfire_id": self._config.bonfire_id,
+                "source_uuid": source_uuid,
+                "target_uuid": target_uuid,
+                "edge_name": edge_name,
+                "fact": fact or f"{source_name} {edge_name} {target_name}",
+            },
+        )
