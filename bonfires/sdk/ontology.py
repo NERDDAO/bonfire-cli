@@ -24,6 +24,38 @@ class OntologyService:
         self._storage = KEngramStorage(config.vault_dir)
 
     # ------------------------------------------------------------------
+    # Extraction type ontology (Delve CRUD)
+    # ------------------------------------------------------------------
+
+    def get_extraction_types(self) -> dict[str, Any]:
+        """Get the extraction type ontology for this bonfire."""
+        from bonfires.sdk.http import _get
+        return _get(
+            self._config,
+            f"/ontology/{self._config.bonfire_id}",
+        )
+
+    def set_extraction_types(
+        self,
+        entity_types: list[str],
+        edge_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Set the extraction type ontology for this bonfire.
+
+        These type names are passed to Graphiti's add_episode during
+        stack processing. Each bonfire defines its own ontology.
+        """
+        from bonfires.sdk.http import _put
+        return _put(
+            self._config,
+            f"/ontology/{self._config.bonfire_id}",
+            body={
+                "entity_types": entity_types,
+                "edge_types": edge_types or [],
+            },
+        )
+
+    # ------------------------------------------------------------------
     # API operations (require network)
     # ------------------------------------------------------------------
 
