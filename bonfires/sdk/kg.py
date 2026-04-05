@@ -340,3 +340,44 @@ class KGService:
                 "fact": fact or f"{source_name} {edge_name} {target_name}",
             },
         )
+
+    def get_stack_status(self, agent_id: str | None = None) -> dict[str, Any]:
+        """Get stack status for an agent. Returns message count, readiness, etc."""
+        aid = agent_id or self._config.agent_id
+        return _get(
+            self._config,
+            f"/agents/{aid}/stack/status",
+        )
+
+    def process_stack(self, agent_id: str | None = None) -> dict[str, Any]:
+        """Trigger immediate stack processing. Returns task_id for polling."""
+        aid = agent_id or self._config.agent_id
+        return _post(
+            self._config,
+            f"/agents/{aid}/stack/process",
+            body={},
+        )
+
+    def get_job_status(self, task_id: str) -> dict[str, Any]:
+        """Poll a background job by task_id. Returns status, result, etc."""
+        return _get(
+            self._config,
+            f"/jobs/{task_id}/status",
+        )
+
+    def wait_for_job(
+        self,
+        task_id: str,
+        timeout: float = 120.0,
+        poll_interval: float = 2.0,
+    ) -> dict[str, Any]:
+        """Poll a job until it completes or times out. Returns final job status."""
+        import time
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.get_job_status(task_id)
+            job_status = status.get("status", "")
+            if job_status in ("completed", "failed", "COMPLETED", "FAILED"):
+                return status
+            time.sleep(poll_interval)
+        return {"status": "timeout", "task_id": task_id}
