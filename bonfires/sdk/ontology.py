@@ -37,21 +37,40 @@ class OntologyService:
 
     def set_extraction_types(
         self,
-        entity_types: list[str],
-        edge_types: list[str] | None = None,
+        entity_labels: list[dict[str, Any]],
+        edge_labels: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Set the extraction type ontology for this bonfire.
 
-        These type names are passed to Graphiti's add_episode during
-        stack processing. Each bonfire defines its own ontology.
+        Each label is a dict with:
+            name: str — type name (e.g. "NewEntitySeed")
+            description: str — extraction guidance for Graphiti
+            labels: list[str] — Graphiti labels (defaults to [name])
+            fields: dict[str, {type, description, required}] — field definitions
+
+        Allowed field types: str, int, float, bool, list[str]
+
+        Example::
+
+            client.ontology.set_extraction_types([
+                {
+                    "name": "QuestSeed",
+                    "description": "Extracted when interaction suggests a quest",
+                    "fields": {
+                        "quest_name": {"type": "str", "required": True},
+                        "giver_name": {"type": "str"},
+                        "objective_hint": {"type": "str"},
+                    }
+                }
+            ])
         """
         from bonfires.sdk.http import _put
         return _put(
             self._config,
             f"/ontology/{self._config.bonfire_id}",
             body={
-                "entity_types": entity_types,
-                "edge_types": edge_types or [],
+                "entity_labels": entity_labels,
+                "edge_labels": edge_labels or [],
             },
         )
 
