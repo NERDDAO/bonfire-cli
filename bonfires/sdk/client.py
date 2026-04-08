@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from trimtab.db import TrimTabDB
-
 from bonfires.sdk.agents import AgentService
 from bonfires.sdk.config import BonfiresConfig
 from bonfires.sdk.exceptions import ConfigError
@@ -35,14 +33,12 @@ class BonfiresClient:
         client.kengrams.create("my-kengram")
         client.ontology.list_profiles()
         client.trimtab.search("dark crypt", grammar="locations")
-        client.db  # local TrimTabDB instance for grammar operations
     """
 
     kg: KGService
     agents: AgentService
     kengrams: KEngramService
     ontology: OntologyService
-    db: TrimTabDB
     trimtab: TrimtabService
 
     def __init__(
@@ -54,7 +50,6 @@ class BonfiresClient:
         agent_id: str | None = None,
         api_url: str | None = None,
         vault_dir: str | None = None,
-        db_path: str | None = None,
     ) -> None:
         if config is not None:
             self._config = config
@@ -72,19 +67,6 @@ class BonfiresClient:
         self.kengrams = KEngramService(self._config, self.kg)
         self.ontology = OntologyService(self._config, self.kg)
         self.trimtab = TrimtabService(self._config)
-
-        # TrimTabDB — defaults to vault_dir/trimtab.db
-        _db_path = db_path or self._default_db_path()
-        self.db = TrimTabDB(_db_path)
-
-    def _default_db_path(self) -> str:
-        """Default DB path: {vault_dir}/trimtab.db"""
-        vault = self._config.vault_dir
-        if vault:
-            from pathlib import Path
-            Path(vault).mkdir(parents=True, exist_ok=True)
-            return f"{vault}/trimtab.db"
-        return ":memory:"
 
     @property
     def config(self) -> BonfiresConfig:
