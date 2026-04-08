@@ -72,26 +72,60 @@ class TrimtabService:
         self,
         query: str,
         grammar: str,
-        rule: str = "origin",
+        rule: str | None = None,
         top_k: int = 3,
         expand: bool = True,
         num_results: int = 10,
+        temperature: float = 0.3,
+        seed: int | None = None,
     ) -> dict[str, Any]:
-        """Semantic presearch via TrimTab grammar; optionally expand from best match in KG.
+        """Semantic grammar search — cascaded (default) or scoped.
 
-        Returns presearch matches and optionally the expanded KG context.
+        Two modes, discriminated by the ``rule`` argument:
+
+        - **Cascaded** (``rule=None``, default): walks the whole grammar
+          tree from the origin rule, picking the contextually best
+          expansion at each ``#ref#``. Returns
+          ``{"mode": "cascaded", "grammar": ..., "text": "<generated>"}``.
+          This is what most callers want — pass a context, get a full
+          generated string back.
+
+        - **Scoped** (``rule`` set): flat top-k matches within that one
+          rule, plus optional KG expansion from the top match's id.
+          Returns ``{"mode": "scoped", "presearch": {...},
+          "kg_context": ...}``. Used for KG-entity presearch — pick an
+          entity by grammar-label match, then delve from it in the KG.
+
+        Args:
+            query: Context string driving embedding-based selection.
+            grammar: Grammar name within the configured bonfire.
+            rule: Specific rule to scope to. Omit for cascading mode.
+            top_k: Candidates per rule (both modes).
+            expand: Scoped mode only — KG-expand from top match.
+            num_results: Scoped mode only — KG results if expanding.
+            temperature: Cascaded mode only — 0 = deterministic, 1 = random.
+            seed: Cascaded mode only — reproducible walks.
+
+        Returns:
+            Dict tagged by ``mode`` — check ``response["mode"]`` before
+            reading either ``response["text"]`` (cascaded) or
+            ``response["presearch"]`` (scoped).
         """
+        body: dict[str, Any] = {
+            "query": query,
+            "grammar": grammar,
+            "top_k": top_k,
+            "expand": expand,
+            "num_results": num_results,
+            "temperature": temperature,
+            "seed": seed,
+        }
+        if rule is not None:
+            body["rule"] = rule
         return _post(
             self._config,
             f"/trimtabs/grammars/{self._config.bonfire_id}/search",
-            body={
-                "query": query,
-                "grammar": grammar,
-                "rule": rule,
-                "top_k": top_k,
-                "expand": expand,
-                "num_results": num_results,
-            },
+            body=body,
         )
 
     def seed(
@@ -107,4 +141,27 @@ class TrimtabService:
             f"/trimtabs/grammars/{self._config.bonfire_id}/seed?"
             f"grammar={grammar}&rule={rule}&kg_query={kg_query}&num_entities={num_entities}",
             body={},
+        )
+
+    def build(
+        self,
+        taxonomy_label_id: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Run the grammar builder LangGraph workflow for this bonfire.
+
+        Builds or refreshes TrimTab grammars from KG state. Uses ontology
+        types as grammars, taxonomy labels as mid-level rules, and
+        LLM-clustered subclasses as leaf rules.
+
+        Args:
+            taxonomy_label_id: Optional taxonomy label ObjectId — if set,
+                runs in ``single_label`` mode restricted to that label.
+                Omit to run over the whole bonfire.
+            dry_run: If True, compute but skip persistence.
+        """
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/build",
+            body={"taxonomy_label_id": taxonomy_label_id, "dry_run": dry_run},
         )
