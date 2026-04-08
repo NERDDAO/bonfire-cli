@@ -5,7 +5,7 @@ prints errors and exits on failure (CLI behavior).
 
 Config is loaded from (in priority order):
 1. Environment variables
-2. ~/.config/bonfires/config.env
+2. ~/.config/bonfires/config.env (from `bonfire init`)
 3. .env in the current directory
 """
 

@@ -574,7 +574,29 @@ def sync(message, file_path, title):
         console.print("[green]OK[/green]")
 
         console.print("[bold]2/2[/bold] Processing stack...", end=" ")
-        console.print("[green]OK[/green]")
+        proc_result = client.kg.process_stack()
+        task_id = proc_result.get("task_id") or proc_result.get("taskId")
+        episode_id = proc_result.get("episode_id")
+        already = proc_result.get("already_processing", False)
+
+        if task_id:
+            console.print(f"[dim]job {task_id[:8]}…[/dim]")
+            console.print("     Waiting for completion...", end=" ")
+            job = client.kg.wait_for_job(task_id, timeout=120.0, poll_interval=3.0)
+            job_status = job.get("status", "unknown")
+            if job_status in ("completed", "COMPLETED"):
+                console.print("[green]OK[/green]")
+                ep = job.get("episode_id") or episode_id
+                if ep:
+                    console.print(f"     Episode: [cyan]{ep}[/cyan]")
+            elif job_status == "timeout":
+                console.print("[yellow]timed out (still processing)[/yellow]")
+            else:
+                console.print(f"[red]{job_status}[/red]")
+        elif episode_id:
+            console.print(f"[green]OK[/green] → episode [cyan]{episode_id}[/cyan]")
+        else:
+            console.print("[green]OK[/green]")
 
         if file_path:
             doc_id = result.get("document_id", "unknown")

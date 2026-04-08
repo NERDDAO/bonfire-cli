@@ -3,8 +3,8 @@
 Config is loaded from (in priority order):
 1. Explicit constructor parameters
 2. Environment variables
-3. ~/.config/bonfires/config.env
-4. .env in the current directory
+3. .env in the current directory
+4. ~/.config/bonfires/config.env (from `bonfire init`, wins over local .env)
 """
 
 from __future__ import annotations
@@ -58,15 +58,15 @@ class BonfiresConfig:
         """
         merged: dict[str, str] = {}
 
-        # Layer 1: global config file
-        if CONFIG_FILE.exists():
-            file_vals = dotenv_values(CONFIG_FILE)
-            merged.update({k: v for k, v in file_vals.items() if v})
-
-        # Layer 2: local .env (overrides global)
+        # Layer 1: local .env (lowest file priority)
         local_env = Path.cwd() / ".env"
         if local_env.exists():
             file_vals = dotenv_values(local_env)
+            merged.update({k: v for k, v in file_vals.items() if v})
+
+        # Layer 2: global config file (from `bonfire init`, wins over local .env)
+        if CONFIG_FILE.exists():
+            file_vals = dotenv_values(CONFIG_FILE)
             merged.update({k: v for k, v in file_vals.items() if v})
 
         # Layer 3: environment variables (highest priority)

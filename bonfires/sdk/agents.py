@@ -133,7 +133,9 @@ class AgentService:
         repo = chat_id.split(":")[0] if ":" in chat_id else "unknown"
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Step 1: Push to stack
+        # Step 1: Push to stack. Metadata must live inside the message —
+        # StackAddRequest has no top-level metadata field and Pydantic drops
+        # unknown keys silently.
         stack_body = {
             "message": {
                 "userId": "claude-code",
@@ -141,11 +143,11 @@ class AgentService:
                 "role": "assistant",
                 "text": message,
                 "timestamp": timestamp,
-            },
-            "metadata": {
-                "type": "memory-sync",
-                "source": "bonfires-sdk",
-                "repo": repo,
+                "metadata": {
+                    "type": "memory-sync",
+                    "source": "bonfires-sdk",
+                    "repo": repo,
+                },
             },
         }
         stack_resp = _post(

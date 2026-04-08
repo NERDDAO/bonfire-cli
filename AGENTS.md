@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **bonfire-cli** (401 symbols, 1329 relationships, 32 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **bonfires-cli** (760 symbols, 2338 relationships, 65 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -17,7 +17,7 @@ This project is indexed by GitNexus as **bonfire-cli** (401 symbols, 1329 relati
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/bonfire-cli/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/bonfires-cli/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -56,10 +56,10 @@ This project is indexed by GitNexus as **bonfire-cli** (401 symbols, 1329 relati
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/bonfire-cli/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/bonfire-cli/clusters` | All functional areas |
-| `gitnexus://repo/bonfire-cli/processes` | All execution flows |
-| `gitnexus://repo/bonfire-cli/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/bonfires-cli/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/bonfires-cli/clusters` | All functional areas |
+| `gitnexus://repo/bonfires-cli/processes` | All execution flows |
+| `gitnexus://repo/bonfires-cli/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 
@@ -89,8 +89,13 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 
 ## CLI
 
-- Re-index: `npx gitnexus analyze`
-- Check freshness: `npx gitnexus status`
-- Generate docs: `npx gitnexus wiki`
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
