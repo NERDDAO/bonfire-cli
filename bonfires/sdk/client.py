@@ -10,6 +10,7 @@ from bonfires.sdk.exceptions import ConfigError
 from bonfires.sdk.kg import KGService
 from bonfires.sdk.kengram import KEngramService
 from bonfires.sdk.ontology import OntologyService
+from bonfires.sdk.trimtab import TrimtabService
 
 
 class BonfiresClient:
@@ -33,7 +34,8 @@ class BonfiresClient:
         client.agents.chat("hello")
         client.kengrams.create("my-kengram")
         client.ontology.list_profiles()
-        client.db  # TrimTabDB instance for grammar operations
+        client.trimtab.search("dark crypt", grammar="locations")
+        client.db  # local TrimTabDB instance for grammar operations
     """
 
     kg: KGService
@@ -41,6 +43,7 @@ class BonfiresClient:
     kengrams: KEngramService
     ontology: OntologyService
     db: TrimTabDB
+    trimtab: TrimtabService
 
     def __init__(
         self,
@@ -68,6 +71,7 @@ class BonfiresClient:
         self.agents = AgentService(self._config)
         self.kengrams = KEngramService(self._config, self.kg)
         self.ontology = OntologyService(self._config, self.kg)
+        self.trimtab = TrimtabService(self._config)
 
         # TrimTabDB — defaults to vault_dir/trimtab.db
         _db_path = db_path or self._default_db_path()
