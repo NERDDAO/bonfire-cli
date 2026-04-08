@@ -77,17 +77,31 @@ class KGService:
         name: str,
         labels: list[str],
         attributes: dict[str, Any],
+        summary: str | None = None,
     ) -> str:
-        """Create a new entity. Returns the UUID."""
+        """Create a new entity. Returns the UUID.
+
+        Args:
+            name: Entity display name.
+            labels: Graphiti labels (e.g., ["NPC", "Blacksmith"]).
+            attributes: Arbitrary attribute dict stored on the entity node.
+            summary: Optional semantic description. This is stored as the
+                top-level Graphiti `summary` field — used for community
+                building, richer embeddings, and agent context.
+        """
+        body: dict[str, Any] = {
+            "name": name,
+            "labels": labels,
+            "attributes": attributes,
+            "bonfire_id": self._config.bonfire_id,
+        }
+        if summary is not None:
+            body["summary"] = summary
+
         result = _post(
             self._config,
             "/knowledge_graph/entity",
-            body={
-                "name": name,
-                "labels": labels,
-                "attributes": attributes,
-                "bonfire_id": self._config.bonfire_id,
-            },
+            body=body,
         )
         uuid = result.get("uuid") if isinstance(result, dict) else None
         if not uuid:
