@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from trimtab.db import TrimTabDB
+
 from bonfires.sdk.agents import AgentService
 from bonfires.sdk.config import BonfiresConfig
 from bonfires.sdk.exceptions import ConfigError
@@ -31,12 +33,14 @@ class BonfiresClient:
         client.agents.chat("hello")
         client.kengrams.create("my-kengram")
         client.ontology.list_profiles()
+        client.db  # TrimTabDB instance for grammar operations
     """
 
     kg: KGService
     agents: AgentService
     kengrams: KEngramService
     ontology: OntologyService
+    db: TrimTabDB
 
     def __init__(
         self,
@@ -47,11 +51,11 @@ class BonfiresClient:
         agent_id: str | None = None,
         api_url: str | None = None,
         vault_dir: str | None = None,
+        db_path: str | None = None,
     ) -> None:
         if config is not None:
             self._config = config
         else:
-            # Build from explicit params + env fallback
             self._config = self._build_config(
                 api_key=api_key,
                 bonfire_id=bonfire_id,
@@ -64,6 +68,19 @@ class BonfiresClient:
         self.agents = AgentService(self._config)
         self.kengrams = KEngramService(self._config, self.kg)
         self.ontology = OntologyService(self._config, self.kg)
+
+        # TrimTabDB — defaults to vault_dir/trimtab.db
+        _db_path = db_path or self._default_db_path()
+        self.db = TrimTabDB(_db_path)
+
+    def _default_db_path(self) -> str:
+        """Default DB path: {vault_dir}/trimtab.db"""
+        vault = self._config.vault_dir
+        if vault:
+            from pathlib import Path
+            Path(vault).mkdir(parents=True, exist_ok=True)
+            return f"{vault}/trimtab.db"
+        return ":memory:"
 
     @property
     def config(self) -> BonfiresConfig:
@@ -85,10 +102,8 @@ class BonfiresClient:
         except ConfigError:
             env_config = None
 
-        # If no explicit params provided and env loading failed, re-raise
         has_explicit = any(v is not None for v in (api_key, bonfire_id, agent_id))
         if not has_explicit and env_config is None:
-            # Re-run to get the original error message
             BonfiresConfig.from_env()
 
         if env_config is not None:
@@ -100,7 +115,6 @@ class BonfiresClient:
                 vault_dir=vault_dir or env_config.vault_dir,
             )
 
-        # No env config — all params must be explicit
         if not api_key or not bonfire_id or not agent_id:
             raise ConfigError(
                 "api_key, bonfire_id, and agent_id are required when env config is unavailable"

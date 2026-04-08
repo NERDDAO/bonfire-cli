@@ -28,6 +28,7 @@ dependencies = [
     "requests>=2.28",
     "python-dotenv>=1.0",
     "rdflib>=7.0",
+    "trimtab>=0.2",
 ]
 
 [project.optional-dependencies]
