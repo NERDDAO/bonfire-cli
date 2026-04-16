@@ -165,3 +165,151 @@ class TrimtabService:
             f"/trimtabs/grammars/{self._config.bonfire_id}/build",
             body={"taxonomy_label_id": taxonomy_label_id, "dry_run": dry_run},
         )
+
+    def update(
+        self,
+        grammar: str,
+        id: str,
+        text: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update an existing expansion's text and/or metadata.
+
+        Args:
+            grammar: Grammar name.
+            id: Expansion UUID to update.
+            text: New text value, or None to leave unchanged.
+            metadata: Metadata dict to merge/replace, or None to leave unchanged.
+
+        Returns:
+            Updated expansion dict with ``grammar``, ``id``, ``text``, ``metadata``.
+        """
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/update",
+            body={"grammar": grammar, "id": id, "text": text, "metadata": metadata},
+        )
+
+    def remove(
+        self,
+        grammar: str,
+        id: str,
+    ) -> dict[str, Any]:
+        """Remove an expansion from a grammar rule by its UUID.
+
+        Args:
+            grammar: Grammar name.
+            id: Expansion UUID to remove.
+
+        Returns:
+            Dict with ``grammar``, ``id``, and ``deleted`` (bool).
+        """
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/remove",
+            body={"grammar": grammar, "id": id},
+        )
+
+    def list_expansions(
+        self,
+        grammar: str,
+        rule: str | None = None,
+        filter_metadata: dict[str, Any] | None = None,
+        sort_by: str | None = None,
+        sort_desc: bool = False,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """List expansions with optional metadata filtering and sorting.
+
+        Args:
+            grammar: Grammar name.
+            rule: Specific rule to list. Omit to list across all rules.
+            filter_metadata: Key/value pairs that expansions must match.
+            sort_by: Metadata field name to sort by.
+            sort_desc: Sort descending if True (default ascending).
+            limit: Maximum number of expansions to return.
+
+        Returns:
+            Dict with ``grammar``, ``expansions`` (list), and ``total`` (int).
+        """
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/list",
+            body={
+                "grammar": grammar,
+                "rule": rule,
+                "filter_metadata": filter_metadata,
+                "sort_by": sort_by,
+                "sort_desc": sort_desc,
+                "limit": limit,
+            },
+        )
+
+    def summary(self) -> dict[str, Any]:
+        """Return a compact summary of all grammars for the configured bonfire.
+
+        Returns:
+            Dict with ``bonfire_id`` and ``grammars`` list.
+        """
+        return _get(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/summary",
+        )
+
+    def search_and_expand(
+        self,
+        grammar: str,
+        query: str,
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Semantic search within a grammar, then KG-expand from the top match.
+
+        Combines a scoped grammar search with a KG context expansion step,
+        returning both the generated text and the raw KG contexts for the
+        matched entity UUIDs.
+
+        Args:
+            grammar: Grammar name to search within.
+            query: Context string driving embedding-based selection.
+            top_k: Number of top candidates to retrieve before expanding.
+
+        Returns:
+            Dict with ``text``, ``center_ids`` (list of matched UUIDs), and
+            ``kg_contexts`` (KG expansion results keyed by UUID).
+        """
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/search-and-expand",
+            body={"grammar": grammar, "query": query, "top_k": top_k},
+        )
+
+    def lens_search(
+        self,
+        query: str,
+        grammars: list[str] | None = None,
+        top_k: int = 3,
+    ) -> dict[str, Any]:
+        """Multi-grammar lens search — runs one query across several grammars in parallel.
+
+        Searches a set of grammars (default: quests, notes, friends, tasks)
+        simultaneously and returns per-grammar result buckets. Useful for
+        "what do I know about X across all my context?" queries.
+
+        Args:
+            query: Context string driving embedding-based selection.
+            grammars: Grammar names to search. Defaults to the bonfire's
+                standard lens set (quests, notes, friends, tasks).
+            top_k: Candidates per grammar.
+
+        Returns:
+            Dict keyed by grammar name — each value is a results bucket with
+            the top-k matched expansions for that grammar.
+        """
+        body: dict[str, Any] = {"query": query, "top_k": top_k}
+        if grammars is not None:
+            body["grammars"] = grammars
+        return _post(
+            self._config,
+            f"/trimtabs/grammars/{self._config.bonfire_id}/lens-search",
+            body=body,
+        )
